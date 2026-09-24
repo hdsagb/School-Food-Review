@@ -1,0 +1,17 @@
+{
+  "float": [
+    { "name": "page_text_font_size", "value": "50fp" },
+    { "name": "title_large", "value": "22fp" },
+    { "name": "title_medium", "value": "18fp" },
+    { "name": "title_small", "value": "16fp" },
+    { "name": "body_text", "value": "14fp" },
+    { "name": "caption_text", "value": "12fp" },
+    { "name": "price_text", "value": "16fp" },
+    { "name": "corner_card", "value": "16vp" },
+    { "name": "corner_large", "value": "24vp" },
+    { "name": "corner_button", "value": "20vp" },
+    { "name": "padding_small", "value": "8vp" },
+    { "name": "padding_normal", "value": "12vp" },
+    { "name": "padding_large", "value": "16vp" }
+  ]
+}

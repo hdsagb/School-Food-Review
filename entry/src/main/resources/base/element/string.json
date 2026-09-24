@@ -1,0 +1,23 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "module description" },
+    { "name": "EntryAbility_desc", "value": "今日校园 · 食堂菜单与评价" },
+    { "name": "EntryAbility_label", "value": "今日校园" },
+    { "name": "app_name", "value": "今日校园" },
+    { "name": "menu_today", "value": "今日菜单" },
+    { "name": "meal_breakfast", "value": "早餐" },
+    { "name": "meal_lunch", "value": "午餐" },
+    { "name": "meal_dinner", "value": "晚餐" },
+    { "name": "search_hint", "value": "搜索菜品" },
+    { "name": "write_review", "value": "写评价" },
+    { "name": "profile", "value": "我的" },
+    { "name": "dish_detail", "value": "菜品详情" },
+    { "name": "loading", "value": "加载中..." },
+    { "name": "empty", "value": "暂无数据" },
+    { "name": "sold_out", "value": "已售罄" },
+    { "name": "signature", "value": "招牌" },
+    { "name": "submit", "value": "提交" },
+    { "name": "favorite", "value": "收藏" },
+    { "name": "useful", "value": "有用" }
+  ]
+}

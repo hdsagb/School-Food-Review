@@ -1,0 +1,567 @@
+import { Api } from '../net/Api';
+import { Canteen, Stall } from '../model/Canteen';
+import { Dish, MealType } from '../model/Dish';
+import { DishCard } from '../components/DishCard';
+import { SkeletonList } from '../components/SkeletonList';
+import { StateView } from '../components/StateView';
+import { getCurrentMealType } from '../utils/CommonUtil';
+import { ThemeUtil } from '../utils/ThemeUtil';
+import { PreferencesUtil } from '../utils/PreferencesUtil';
+import { AppConfig } from '../config/AppConfig';
+import { DishDetailPage } from './DishDetailPage';
+import { WriteReviewPage } from './WriteReviewPage';
+import { ProfilePage } from './ProfilePage';
+import { MyReviewsPage } from './MyReviewsPage';
+import { FavoritesPage } from './FavoritesPage';
+import { PrivacyPage } from './PrivacyPage';
+
+/** 菜单缓存结构（离线兜底） */
+interface MenuCache {
+  canteenId: string;
+  mealType: string;
+  dishes: Dish[];
+  saveTime: number;
+}
+
+@Entry
+@Component
+struct Index {
+  private pathStack: NavPathStack = new NavPathStack();
+  @State canteens: Canteen[] = [];
+  @State currentCanteenIdx: number = 0;
+  @State currentMealIdx: number = getCurrentMealType();
+  @State dishes: Dish[] = [];
+  @State loading: boolean = true;
+  @State error: string = '';
+  @StorageLink('favorites') favorites: string[] = [];
+  @StorageLink('darkMode') darkMode: boolean = false;
+  @State searchKeyword: string = '';
+  @State searchHistory: string[] = [];
+  @State stalls: Stall[] = [];
+  @State currentStallId: string = '';
+
+  private meals: MealType[] = [MealType.BREAKFAST, MealType.LUNCH, MealType.DINNER];
+  private mealLabels: string[] = ['早餐', '午餐', '晚餐'];
+  private mealEmojis: string[] = ['🌅', '🍜', '🌙'];
+  private mealGreetings: string[] = [
+    '早安！一日之计在于晨',
+    '中午好！干饭时间到',
+    '晚上好！犒劳一下自己'
+  ];
+  private searchTimer: number = -1;
+
+  async aboutToAppear(): Promise<void> {
+    await this.loadCanteens();
+    await this.loadStalls();
+    await this.loadMenu();
+    this.favorites = await Api.getFavorites();
+    this.searchHistory = await PreferencesUtil.getSearchHistory();
+  }
+
+  /** 页面重新显示时刷新收藏，保证从详情页返回后红心同步 */
+  async onPageShow(): Promise<void> {
+    this.favorites = await Api.getFavorites();
+  }
+
+  async loadCanteens(): Promise<void> {
+    try {
+      this.canteens = await Api.getCanteenList();
+    } catch (e) {
+      this.error = (e as Error).message;
+    }
+  }
+
+  async loadMenu(): Promise<void> {
+    if (this.canteens.length === 0) return;
+    this.loading = true;
+    this.error = '';
+    try {
+      const canteenId = this.canteens[this.currentCanteenIdx].id;
+      const mealType = this.meals[this.currentMealIdx];
+      let list: Dish[];
+      if (this.searchKeyword) {
+        list = await Api.searchDishes(this.searchKeyword);
+        this.recordSearchHistory(this.searchKeyword);
+      } else {
+        list = await Api.getTodayMenu(canteenId, mealType);
+        await this.saveMenuCache(list);
+      }
+      this.dishes = this.filterByStall(list);
+    } catch (e) {
+      const cached = await this.loadMenuCache();
+      if (cached !== null && cached.length > 0) {
+        this.dishes = this.filterByStall(cached);
+      } else {
+        this.error = (e as Error).message;
+      }
+    } finally {
+      this.loading = false;
+    }
+  }
+
+  /** 搜索输入防抖：500ms 后触发 */
+  private onSearchChange(value: string): void {
+    this.searchKeyword = value;
+    if (this.searchTimer !== -1) {
+      clearTimeout(this.searchTimer);
+    }
+    this.searchTimer = setTimeout((): void => {
+      this.searchTimer = -1;
+      this.loadMenu();
+    }, 500);
+  }
+
+  /** 记录搜索历史（去重、限量） */
+  private recordSearchHistory(keyword: string): void {
+    const kw = keyword.trim();
+    if (!kw) return;
+    const next: string[] = [kw, ...this.searchHistory.filter((k: string): boolean => k !== kw)]
+      .slice(0, AppConfig.SEARCH_HISTORY_MAX);
+    this.searchHistory = next;
+    PreferencesUtil.saveSearchHistory(next);
+  }
+
+  private async clearSearchHistory(): Promise<void> {
+    this.searchHistory = [];
+    await PreferencesUtil.saveSearchHistory([]);
+  }
+
+  /** 成功加载菜单后写入离线缓存（保存未筛选的完整列表） */
+  private async saveMenuCache(list: Dish[]): Promise<void> {
+    if (list.length === 0) return;
+    const cache: MenuCache = {
+      canteenId: this.canteens[this.currentCanteenIdx].id,
+      mealType: this.meals[this.currentMealIdx],
+      dishes: list,
+      saveTime: Date.now()
+    };
+    await PreferencesUtil.putObject(AppConfig.PREF_KEY_MENU_CACHE, cache);
+  }
+
+  /** 网络失败时读取匹配当前选择的离线缓存 */
+  private async loadMenuCache(): Promise<Dish[] | null> {
+    const cache = await PreferencesUtil.getObject<MenuCache>(AppConfig.PREF_KEY_MENU_CACHE);
+    if (!cache) return null;
+    const cid = this.canteens.length > 0 ? this.canteens[this.currentCanteenIdx].id : '';
+    if (cache.canteenId === cid && cache.mealType === this.meals[this.currentMealIdx]) {
+      return cache.dishes;
+    }
+    return null;
+  }
+
+  /** 加载当前食堂的档口列表 */
+  private async loadStalls(): Promise<void> {
+    if (this.canteens.length === 0) return;
+    try {
+      this.stalls = await Api.getStallList(this.canteens[this.currentCanteenIdx].id);
+    } catch (e) {
+      console.error('loadStalls error: ' + (e as Error).message);
+      this.stalls = [];
+    }
+  }
+
+  /** 按选中档口筛选菜品（空 = 全部） */
+  private filterByStall(list: Dish[]): Dish[] {
+    if (!this.currentStallId) return list;
+    return list.filter((d: Dish): boolean => d.stallId === this.currentStallId);
+  }
+
+  private onRefreshTap(): void {
+    this.loadMenu();
+  }
+
+  private getDateLabel(): string {
+    const now = new Date();
+    return `${now.getMonth() + 1}月${now.getDate()}日`;
+  }
+
+  build() {
+    Navigation(this.pathStack) {
+      Column() {
+        this.HeaderBar()
+      this.CanteenChips()
+      this.MealChips()
+      this.StallChips()
+      this.SearchHistory()
+
+      if (this.loading) {
+        SkeletonList({ count: 4 })
+          .layoutWeight(1)
+      } else if (this.error) {
+        Column() {
+          StateView({ state: 'error', message: this.error, doRetry: (): void => { this.onRefreshTap(); } })
+        }
+          .layoutWeight(1)
+          .justifyContent(FlexAlign.Center)
+      } else if (this.dishes.length === 0) {
+        Column() { StateView({ state: 'empty' }) }
+          .layoutWeight(1)
+          .justifyContent(FlexAlign.Center)
+      } else {
+        Refresh({ refreshing: $$this.loading }) {
+          List({ space: 10 }) {
+            ForEach(this.dishes, (d: Dish) => {
+              ListItem() {
+                DishCard({
+                  dishData: d,
+                  isFavorite: this.favorites.includes(d.id),
+                  doTap: (): void => { this.goDetail(d.id); },
+                  doFavorite: (): void => { this.toggleFavorite(d.id); }
+                })
+              }
+            }, (d: Dish) => d.id)
+          }
+          .width('100%')
+          .height('100%')
+          .padding({ left: 14, right: 14, top: 10, bottom: 14 })
+        }
+        .onRefreshing((): void => { this.loadMenu(); })
+        .layoutWeight(1)
+      }
+
+      this.BottomBar()
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor(ThemeUtil.pageBg(this.darkMode))
+    }
+    .mode(NavigationMode.Stack)
+    .hideTitleBar(true)
+    .navDestination(this.PagesMap)
+  }
+
+  @Builder PagesMap(name: string) {
+    if (name === 'DishDetail') {
+      DishDetailPage()
+    } else if (name === 'WriteReview') {
+      WriteReviewPage()
+    } else if (name === 'Profile') {
+      ProfilePage()
+    } else if (name === 'MyReviews') {
+      MyReviewsPage()
+    } else if (name === 'Favorites') {
+      FavoritesPage()
+    } else if (name === 'Privacy') {
+      PrivacyPage()
+    }
+  }
+
+  @Builder HeaderBar() {
+    Stack() {
+      // 装饰性半透明气泡，增加青春氛围
+      Circle({ width: 130, height: 130 })
+        .fill('rgba(255,255,255,0.14)')
+        .position({ x: '72%', y: -46 })
+      Circle({ width: 64, height: 64 })
+        .fill('rgba(255,255,255,0.12)')
+        .position({ x: '60%', y: 54 })
+      Circle({ width: 40, height: 40 })
+        .fill('rgba(255,255,255,0.18)')
+        .position({ x: -12, y: 20 })
+
+      Column({ space: 10 }) {
+        Row({ space: 8 }) {
+          Text('🌿')
+            .fontSize(24)
+          Text('今日校园')
+            .fontSize($r('app.float.title_large'))
+            .fontWeight(FontWeight.Bold)
+            .fontColor(Color.White)
+            .layoutWeight(1)
+          Text(`${this.getDateLabel()} · ${this.mealLabels[this.currentMealIdx]}`)
+            .fontSize(11)
+            .fontColor('rgba(255,255,255,0.9)')
+            .backgroundColor('rgba(255,255,255,0.22)')
+            .borderRadius(12)
+            .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+        }
+        .width('100%')
+
+        Text(`${this.mealGreetings[this.currentMealIdx]}，今天想吃点啥？`)
+          .fontSize($r('app.float.body_text'))
+          .fontColor('rgba(255,255,255,0.92)')
+          .width('100%')
+
+        Row({ space: 6 }) {
+          Text('🔍')
+            .fontSize(14)
+          TextInput({ placeholder: '搜索菜品，比如「牛肉面」' })
+            .layoutWeight(1)
+            .height(36)
+            .fontSize($r('app.float.caption_text'))
+            .fontColor('#1C3B30')
+            .placeholderColor('#8FA69B')
+            .placeholderFont({ size: $r('app.float.caption_text') })
+            .backgroundColor(Color.Transparent)
+            .padding(0)
+            .onChange((v: string): void => { this.onSearchChange(v); })
+            .onSubmit((): void => {
+              if (this.searchTimer !== -1) {
+                clearTimeout(this.searchTimer);
+                this.searchTimer = -1;
+              }
+              this.loadMenu();
+            })
+        }
+        .width('100%')
+        .height(40)
+        .padding({ left: 12, right: 12 })
+        .backgroundColor('rgba(255,255,255,0.95)')
+        .borderRadius(20)
+        .alignItems(VerticalAlign.Center)
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 14, bottom: 16 })
+    }
+    .width('100%')
+    .linearGradient({
+      angle: 160,
+      colors: [
+        [$r('app.color.brand_gradient_start'), 0.0],
+        [$r('app.color.brand_gradient_end'), 1.0]
+      ]
+    })
+    .borderRadius({ bottomLeft: 22, bottomRight: 22 })
+  }
+
+  @Builder StallChips() {
+    if (this.stalls.length > 0) {
+      Column({ space: 4 }) {
+        Row() {
+          Text(`📍 ${this.canteens[this.currentCanteenIdx].name} 档口`)
+            .fontSize($r('app.float.caption_text'))
+            .fontColor(ThemeUtil.textHint(this.darkMode))
+            .layoutWeight(1)
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16 })
+
+        Scroll() {
+          Row({ space: 8 }) {
+            this.StallChip('全部', '')
+            ForEach(this.stalls, (s: Stall) => {
+              this.StallChip(s.name, s.id)
+            }, (s: Stall) => s.id)
+          }
+          .padding({ left: 16, right: 16 })
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+        .width('100%')
+      }
+      .width('100%')
+      .margin({ top: 8 })
+    }
+  }
+
+  @Builder StallChip(label: string, stallId: string) {
+    Text(label)
+      .fontSize($r('app.float.caption_text'))
+      .fontColor(this.currentStallId === stallId ? Color.White : ThemeUtil.textSecondary(this.darkMode))
+      .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+      .borderRadius(15)
+      .backgroundColor(this.currentStallId === stallId ? Color.Transparent : ThemeUtil.cardBg(this.darkMode))
+      .linearGradient(this.currentStallId === stallId ? {
+        angle: 135,
+        colors: [
+          [$r('app.color.brand_gradient_start'), 0.0],
+          [ThemeUtil.brandPrimaryDark(this.darkMode), 1.0]
+        ]
+      } : {
+        angle: 135,
+        colors: [
+          [ThemeUtil.cardBg(this.darkMode), 0.0],
+          [ThemeUtil.cardBg(this.darkMode), 1.0]
+        ]
+      })
+      .shadow(this.currentStallId === stallId ? {
+        radius: 8, color: 'rgba(18,169,150,0.3)', offsetX: 0, offsetY: 2
+      } : {
+        radius: 6, color: 'rgba(28,59,48,0.05)', offsetX: 0, offsetY: 2
+      })
+      .onClick((): void => {
+        this.currentStallId = stallId;
+        this.loadMenu();
+      })
+  }
+
+  @Builder SearchHistory() {
+    if (this.searchKeyword === '' && this.searchHistory.length > 0) {
+      Column({ space: 6 }) {
+        Row() {
+          Text('🕘 最近搜索')
+            .fontSize($r('app.float.caption_text'))
+            .fontColor(ThemeUtil.textHint(this.darkMode))
+            .layoutWeight(1)
+          Text('清除')
+            .fontSize($r('app.float.caption_text'))
+            .fontColor(ThemeUtil.textHint(this.darkMode))
+            .onClick((): void => { this.clearSearchHistory(); })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16 })
+
+        Scroll() {
+          Row({ space: 8 }) {
+            ForEach(this.searchHistory, (kw: string) => {
+              Text(`# ${kw}`)
+                .fontSize($r('app.float.caption_text'))
+                .fontColor(ThemeUtil.brandDeep(this.darkMode))
+                .backgroundColor(ThemeUtil.tagBg(this.darkMode))
+                .borderRadius(14)
+                .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                .onClick((): void => {
+                  this.searchKeyword = kw;
+                  this.loadMenu();
+                })
+            }, (kw: string) => kw)
+          }
+          .padding({ left: 16, right: 16 })
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+        .width('100%')
+      }
+      .width('100%')
+    }
+  }
+
+  @Builder CanteenChips() {
+    Scroll() {
+      Row({ space: 10 }) {
+        ForEach(this.canteens, (c: Canteen, idx: number) => {
+          Column({ space: 3 }) {
+            Row({ space: 4 }) {
+              Text('📍')
+                .fontSize(12)
+              Text(c.name)
+                .fontSize($r('app.float.body_text'))
+                .fontWeight(FontWeight.Medium)
+            }
+            Text(`${c.location} · ${c.openHours}`)
+              .fontSize(10)
+              .fontColor(this.currentCanteenIdx === idx ? 'rgba(255,255,255,0.85)' : ThemeUtil.textHint(this.darkMode))
+          }
+          .alignItems(HorizontalAlign.Start)
+          .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+          .borderRadius(14)
+          .backgroundColor(this.currentCanteenIdx === idx ? Color.Transparent : ThemeUtil.cardBg(this.darkMode))
+          .linearGradient(this.currentCanteenIdx === idx ? {
+            angle: 135,
+            colors: [
+              [$r('app.color.brand_gradient_start'), 0.0],
+              [ThemeUtil.brandPrimaryDark(this.darkMode), 1.0]
+            ]
+          } : {
+            angle: 135,
+            colors: [
+              [ThemeUtil.cardBg(this.darkMode), 0.0],
+              [ThemeUtil.cardBg(this.darkMode), 1.0]
+            ]
+          })
+          .shadow(this.currentCanteenIdx === idx ? {
+            radius: 10, color: 'rgba(18,169,150,0.35)', offsetX: 0, offsetY: 3
+          } : {
+            radius: 6, color: 'rgba(28,59,48,0.05)', offsetX: 0, offsetY: 2
+          })
+          .onClick((): void => {
+            this.currentCanteenIdx = idx;
+            this.currentStallId = '';
+            this.loadStalls();
+            this.loadMenu();
+          })
+        }, (c: Canteen) => c.id)
+      }
+      .padding({ left: 16, right: 16 })
+    }
+    .scrollable(ScrollDirection.Horizontal)
+    .scrollBar(BarState.Off)
+    .height(64)
+    .width('100%')
+    .margin({ top: 12 })
+  }
+
+  @Builder MealChips() {
+    Row({ space: 0 }) {
+      ForEach(this.mealLabels, (label: string, idx: number) => {
+        Row({ space: 4 }) {
+          Text(this.mealEmojis[idx])
+            .fontSize(14)
+            .opacity(this.currentMealIdx === idx ? 1.0 : 0.6)
+          Text(label)
+            .fontSize($r('app.float.body_text'))
+            .fontWeight(this.currentMealIdx === idx ? FontWeight.Bold : FontWeight.Normal)
+            .fontColor(this.currentMealIdx === idx ? Color.White : ThemeUtil.textSecondary(this.darkMode))
+        }
+        .layoutWeight(1)
+        .height(34)
+        .justifyContent(FlexAlign.Center)
+        .borderRadius(17)
+        .linearGradient(this.currentMealIdx === idx ? {
+          angle: 135,
+          colors: [
+            [$r('app.color.brand_gradient_start'), 0.0],
+            [ThemeUtil.brandPrimaryDark(this.darkMode), 1.0]
+          ]
+        } : {
+          angle: 135,
+          colors: [
+            [Color.Transparent, 0.0],
+            [Color.Transparent, 1.0]
+          ]
+        })
+        .onClick((): void => {
+          this.currentMealIdx = idx;
+          this.loadMenu();
+        })
+      }, (label: string) => label)
+    }
+    .width('100%')
+    .height(40)
+    .margin({ left: 14, right: 14, top: 10, bottom: 4 })
+    .padding(3)
+    .backgroundColor(ThemeUtil.cardBg(this.darkMode))
+    .borderRadius(20)
+    .shadow({ radius: 8, color: 'rgba(28,59,48,0.06)', offsetX: 0, offsetY: 2 })
+  }
+
+  @Builder BottomBar() {
+    Row() {
+      this.TabItem('🍽️', '今日菜单', true, (): void => {})
+      this.TabItem('🧑‍🎓', '我的', false, (): void => { this.goProfile(); })
+    }
+    .width('100%')
+    .height(58)
+    .backgroundColor(ThemeUtil.cardBg(this.darkMode))
+    .shadow({ radius: 12, color: 'rgba(28,59,48,0.08)', offsetX: 0, offsetY: -3 })
+    .padding({ top: 6, bottom: 6 })
+  }
+
+  @Builder TabItem(emoji: string, label: string, active: boolean, onTap: () => void) {
+    Column({ space: 2 }) {
+      Text(emoji)
+        .fontSize(20)
+        .opacity(active ? 1.0 : 0.55)
+      Text(label)
+        .fontSize(10)
+        .fontWeight(active ? FontWeight.Bold : FontWeight.Normal)
+        .fontColor(active ? ThemeUtil.brandPrimaryDark(this.darkMode) : ThemeUtil.textHint(this.darkMode))
+    }
+    .layoutWeight(1)
+    .justifyContent(FlexAlign.Center)
+    .onClick((): void => { onTap(); })
+  }
+
+  private async toggleFavorite(dishId: string): Promise<void> {
+    this.favorites = await Api.toggleFavorite(dishId);
+    await PreferencesUtil.saveFavorites(this.favorites);
+  }
+
+  private goDetail(dishId: string): void {
+    this.pathStack.pushPathByName('DishDetail', dishId);
+  }
+
+  private goProfile(): void {
+    this.pathStack.pushPathByName('Profile', '');
+  }
+}

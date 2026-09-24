@@ -1,0 +1,28 @@
+{
+  "color": [
+    { "name": "start_window_background", "value": "#F0FAF5" },
+    { "name": "bg_page", "value": "#F0F9F3" },
+    { "name": "bg_card", "value": "#FFFFFF" },
+    { "name": "text_primary", "value": "#1C3B30" },
+    { "name": "text_secondary", "value": "#557266" },
+    { "name": "text_hint", "value": "#8FA69B" },
+    { "name": "text_price", "value": "#FF6B57" },
+    { "name": "brand_primary", "value": "#17BE8A" },
+    { "name": "brand_primary_dark", "value": "#0EA374" },
+    { "name": "brand_deep", "value": "#0B8A63" },
+    { "name": "brand_gradient_start", "value": "#3BE3A4" },
+    { "name": "brand_gradient_end", "value": "#14B8C9" },
+    { "name": "divider", "value": "#E2F0E9" },
+    { "name": "tag_bg", "value": "#DFF6EA" },
+    { "name": "tag_text", "value": "#12996B" },
+    { "name": "tag_warm_bg", "value": "#FFEDE2" },
+    { "name": "tag_warm_text", "value": "#F2693C" },
+    { "name": "accent_gold_bg", "value": "#FFF4D6" },
+    { "name": "accent_gold_text", "value": "#DB9A00" },
+    { "name": "sold_out_bg", "value": "#EAF1EC" },
+    { "name": "sold_out_text", "value": "#9BB0A6" },
+    { "name": "star_active", "value": "#FFB300" },
+    { "name": "star_inactive", "value": "#D9E7DF" },
+    { "name": "skeleton_bg", "value": "#E3EFE8" }
+  ]
+}
