@@ -1,6 +1,7 @@
 /**
  * 隐私声明页：说明数据收集与使用方式（Demo 版）
  */
+import { TopBar } from '../components/TopBar';
 import { ThemeUtil } from '../utils/ThemeUtil';
 
 @Component
@@ -11,7 +12,7 @@ export struct PrivacyPage {
   build() {
     NavDestination() {
       Column() {
-        this.TopBar()
+        TopBar({ title: '隐私声明', onBack: (): void => { this.pathStack.pop(); } })
 
         Scroll() {
           Column({ space: 10 }) {
@@ -43,25 +44,6 @@ export struct PrivacyPage {
     .onReady((ctx: NavDestinationContext) => {
       this.pathStack = ctx.pathStack;
     })
-  }
-
-  @Builder TopBar() {
-    Row() {
-      Text('←')
-        .fontSize(24)
-        .padding(8)
-        .onClick((): void => { this.pathStack.pop(); })
-      Text('隐私声明')
-        .fontSize($r('app.float.title_medium'))
-        .fontWeight(FontWeight.Medium)
-        .layoutWeight(1)
-        .textAlign(TextAlign.Center)
-      Text('').width(40)
-    }
-    .width('100%')
-    .height(48)
-    .padding({ left: 8, right: 8 })
-    .backgroundColor(ThemeUtil.cardBg(this.darkMode))
   }
 
   @Builder Section(title: string, content: string) {

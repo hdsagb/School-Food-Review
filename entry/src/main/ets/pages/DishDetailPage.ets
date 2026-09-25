@@ -3,6 +3,8 @@ import { Dish } from '../model/Dish';
 import { Review, ReviewPage, ReviewSortType } from '../model/Review';
 import { StarRating } from '../components/StarRating';
 import { StateView } from '../components/StateView';
+import { TopBar } from '../components/TopBar';
+import { LoadMoreFooter } from '../components/LoadMoreFooter';
 import { PreferencesUtil } from '../utils/PreferencesUtil';
 import { formatRelativeTime, dishImageSource } from '../utils/CommonUtil';
 import { ThemeUtil } from '../utils/ThemeUtil';
@@ -85,7 +87,7 @@ export struct DishDetailPage {
   build() {
     NavDestination() {
       Column() {
-        this.TopBar()
+        TopBar({ title: '菜品详情', onBack: (): void => { this.pathStack.pop(); } })
 
       if (!this.dish) {
         StateView({ state: 'loading' }).layoutWeight(1)
@@ -120,25 +122,6 @@ export struct DishDetailPage {
       const p = ctx.pathInfo.param as string;
       this.initPage(p ?? '');
     })
-  }
-
-  @Builder TopBar() {
-    Row() {
-      Text('←')
-        .fontSize(24)
-        .padding(8)
-        .onClick((): void => { this.pathStack.pop(); })
-      Text($r('app.string.dish_detail'))
-        .fontSize($r('app.float.title_medium'))
-        .fontWeight(FontWeight.Medium)
-        .layoutWeight(1)
-        .textAlign(TextAlign.Center)
-      Text('').width(40)
-    }
-    .width('100%')
-    .height(48)
-    .padding({ left: 8, right: 8 })
-    .backgroundColor(ThemeUtil.cardBg(this.darkMode))
   }
 
   @Builder DishHeader(d: Dish) {
@@ -221,24 +204,12 @@ export struct DishDetailPage {
         ForEach(this.reviews, (r: Review) => {
           this.ReviewItem(r)
         }, (r: Review) => `${r.id}_${r.likes}`)
-        if (this.hasMore) {
-          Button(this.loadingMore ? '加载中...' : '加载更多评价')
-            .type(ButtonType.Capsule)
-            .width('100%')
-            .height(34)
-            .fontSize($r('app.float.caption_text'))
-            .backgroundColor(ThemeUtil.tagBg(this.darkMode))
-            .fontColor(ThemeUtil.brandDeep(this.darkMode))
-            .enabled(!this.loadingMore)
-            .margin({ top: 8 })
-            .onClick((): void => { this.loadReviews(false); })
-        } else if (this.reviews.length > 0) {
-          Text('— 没有更多了 —')
-            .fontSize($r('app.float.caption_text'))
-            .fontColor(ThemeUtil.textHint(this.darkMode))
-            .width('100%')
-            .textAlign(TextAlign.Center)
-            .padding({ top: 8 })
+        if (this.reviews.length > 0 || this.hasMore) {
+          LoadMoreFooter({
+            loading: this.loadingMore,
+            hasMore: this.hasMore,
+            onLoadMore: (): void => { this.loadReviews(false); }
+          })
         }
       }
     }

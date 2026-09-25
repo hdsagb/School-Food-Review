@@ -2,6 +2,7 @@ import { Api } from '../net/Api';
 import { Dish } from '../model/Dish';
 import { StarRating } from '../components/StarRating';
 import { StateView } from '../components/StateView';
+import { TopBar } from '../components/TopBar';
 import { dishImageSource } from '../utils/CommonUtil';
 import { ThemeUtil } from '../utils/ThemeUtil';
 
@@ -31,7 +32,7 @@ export struct FavoritesPage {
   build() {
     NavDestination() {
       Column() {
-        this.TopBar()
+        TopBar({ title: '我的收藏', onBack: (): void => { this.pathStack.pop(); } })
 
         if (!this.loaded) {
           Column() { StateView({ state: 'loading' }) }
@@ -70,25 +71,6 @@ export struct FavoritesPage {
       this.loadData();
     })
     .onShown((): void => { this.loadData(); })
-  }
-
-  @Builder TopBar() {
-    Row() {
-      Text('←')
-        .fontSize(24)
-        .padding(8)
-        .onClick((): void => { this.pathStack.pop(); })
-      Text('我的收藏')
-        .fontSize($r('app.float.title_medium'))
-        .fontWeight(FontWeight.Medium)
-        .layoutWeight(1)
-        .textAlign(TextAlign.Center)
-      Text('').width(40)
-    }
-    .width('100%')
-    .height(48)
-    .padding({ left: 8, right: 8 })
-    .backgroundColor(ThemeUtil.cardBg(this.darkMode))
   }
 
   @Builder FavoriteCard(d: Dish) {

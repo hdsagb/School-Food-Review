@@ -3,6 +3,7 @@ import { Api } from '../net/Api';
 import { ReviewDimensions, WriteReviewParam } from '../model/Review';
 import { AppConfig } from '../config/AppConfig';
 import { StarRating } from '../components/StarRating';
+import { TopBar } from '../components/TopBar';
 import { ThemeUtil } from '../utils/ThemeUtil';
 
 @Component
@@ -22,7 +23,7 @@ export struct WriteReviewPage {
   build() {
     NavDestination() {
       Column() {
-        this.TopBar()
+        TopBar({ title: '写评价', leftText: '取消', onBack: (): void => { this.pathStack.pop(); } })
 
       Scroll() {
         Column({ space: 16 }) {
@@ -51,26 +52,6 @@ export struct WriteReviewPage {
       const p = ctx.pathInfo.param as string;
       this.dishId = p ?? '';
     })
-  }
-
-  @Builder TopBar() {
-    Row() {
-      Text('取消')
-        .fontSize($r('app.float.body_text'))
-        .fontColor(ThemeUtil.textSecondary(this.darkMode))
-        .padding(8)
-        .onClick((): void => { this.pathStack.pop(); })
-      Text($r('app.string.write_review'))
-        .fontSize($r('app.float.title_medium'))
-        .fontWeight(FontWeight.Medium)
-        .layoutWeight(1)
-        .textAlign(TextAlign.Center)
-      Text('').width(48)
-    }
-    .width('100%')
-    .height(48)
-    .padding({ left: 8, right: 8 })
-    .backgroundColor(ThemeUtil.cardBg(this.darkMode))
   }
 
   @Builder OverallRating() {
