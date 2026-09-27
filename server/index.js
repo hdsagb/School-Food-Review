@@ -1,5 +1,5 @@
 /**
- * 今日校园演示后端入口
+ * 校园食评演示后端入口
  * 启动：node index.js  （默认端口 3000）
  */
 const express = require('express');
@@ -33,7 +33,7 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`[server] 今日校园演示后端已启动: http://localhost:${PORT}`);
+  console.log(`[server] 校园食评演示后端已启动: http://localhost:${PORT}`);
   console.log(`[server] 管理端: http://localhost:${PORT}/   （默认账号 admin / admin123）`);
 });
 

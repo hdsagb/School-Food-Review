@@ -72,7 +72,11 @@ struct Index {
   }
 
   async loadMenu(): Promise<void> {
-    if (this.canteens.length === 0) return;
+    if (this.canteens.length === 0) {
+      // 食堂列表加载失败时也结束 loading，让错误态（含重试）能显示出来
+      this.loading = false;
+      return;
+    }
     this.loading = true;
     this.error = '';
     try {
@@ -263,7 +267,7 @@ struct Index {
         Row({ space: 8 }) {
           Text('🌿')
             .fontSize(24)
-          Text('今日校园')
+          Text('校园食评')
             .fontSize($r('app.float.title_large'))
             .fontWeight(FontWeight.Bold)
             .fontColor(Color.White)

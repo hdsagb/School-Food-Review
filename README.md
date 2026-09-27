@@ -1,4 +1,4 @@
-# School Food Review（今日校园 · 食堂菜单与菜品评价）
+# School Food Review（校园食评 · 食堂菜单与菜品评价）
 
 基于 HarmonyOS（鸿蒙）ArkTS 开发的校园食堂应用 Demo：浏览食堂菜单、查看菜品详情、发表与查看评价、收藏菜品、切换深色模式。配套 Node.js + Express + SQLite 真实后端与网页管理后台。
 

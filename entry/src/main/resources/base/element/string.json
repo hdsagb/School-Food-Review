@@ -1,9 +1,9 @@
 {
   "string": [
     { "name": "module_desc", "value": "module description" },
-    { "name": "EntryAbility_desc", "value": "今日校园 · 食堂菜单与评价" },
-    { "name": "EntryAbility_label", "value": "今日校园" },
-    { "name": "app_name", "value": "今日校园" },
+    { "name": "EntryAbility_desc", "value": "校园食评 · 食堂菜单与评价" },
+    { "name": "EntryAbility_label", "value": "校园食评" },
+    { "name": "app_name", "value": "校园食评" },
     { "name": "menu_today", "value": "今日菜单" },
     { "name": "meal_breakfast", "value": "早餐" },
     { "name": "meal_lunch", "value": "午餐" },

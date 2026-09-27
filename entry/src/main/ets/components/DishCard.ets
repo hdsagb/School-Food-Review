@@ -36,7 +36,6 @@ export struct DishCard {
           .height(92)
           .borderRadius(14)
           .objectFit(ImageFit.Cover)
-          .onClick((): void => { this.handleTap(); })
 
         if (this.dishData.soldOut) {
           Text($r('app.string.sold_out'))
@@ -84,7 +83,6 @@ export struct DishCard {
           }
         }
         .width('100%')
-        .onClick((): void => { this.handleTap(); })
 
         Row({ space: 4 }) {
           StarRating({ rating: this.dishData.rating, starSize: 12 })
@@ -141,5 +139,6 @@ export struct DishCard {
     .backgroundColor(ThemeUtil.cardBg(this.darkMode))
     .borderRadius($r('app.float.corner_card'))
     .shadow({ radius: 10, color: 'rgba(28,59,48,0.06)', offsetX: 0, offsetY: 3 })
+    .onClick((): void => { this.handleTap(); })
   }
 }

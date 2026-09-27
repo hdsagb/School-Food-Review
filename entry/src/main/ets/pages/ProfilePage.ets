@@ -111,7 +111,7 @@ export struct ProfilePage {
       this.MenuItem('🧹 清除缓存', '', (): void => { this.clearCache(); })
       this.DarkModeRow()
       this.MenuItem('📋 隐私声明', '', (): void => { this.goPrivacy(); })
-      this.MenuItem('🌿 关于今日校园', 'v1.0.0', (): void => {})
+      this.MenuItem('🌿 关于校园食评', 'v1.0.0', (): void => {})
     }
     .width('100%')
     .height('100%')
