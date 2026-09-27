@@ -3,6 +3,7 @@ import { PreferencesUtil } from '../utils/PreferencesUtil';
 import { generateUuid } from '../utils/CommonUtil';
 import { ThemeUtil } from '../utils/ThemeUtil';
 import { Api } from '../net/Api';
+import { AppConfig } from '../config/AppConfig';
 import { ConfigurationConstant } from '@kit.AbilityKit';
 
 @Component
@@ -15,17 +16,27 @@ export struct ProfilePage {
   @StorageLink('favorites') favorites: string[] = [];
 
   async aboutToAppear(): Promise<void> {
-    this.user = await PreferencesUtil.getUser();
-    if (!this.user) {
-      this.user = new User(
-        generateUuid(),
-        '同学' + Math.floor(Math.random() * 1000),
-        '',
-        []
-      );
-      await PreferencesUtil.saveUser(this.user);
+    if (AppConfig.USE_MOCK) {
+      this.user = await PreferencesUtil.getUser();
+      if (!this.user) {
+        this.user = new User(
+          generateUuid(),
+          '同学' + Math.floor(Math.random() * 1000),
+          '',
+          []
+        );
+        await PreferencesUtil.saveUser(this.user);
+      }
+    } else {
+      // 真实后端：首次访问由服务端建号并下发 X-Auth-Token
+      try {
+        this.user = await Api.getLocalUser();
+        await PreferencesUtil.saveUser(this.user);
+      } catch (e) {
+        console.error('getLocalUser error: ' + (e as Error).message);
+      }
     }
-    this.nickname = this.user.nickname;
+    this.nickname = this.user ? this.user.nickname : '';
     this.darkMode = await PreferencesUtil.getDarkMode();
     this.refreshCounts();
   }

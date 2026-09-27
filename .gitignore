@@ -10,3 +10,9 @@
 /.clang-tidy
 **/.test
 /.appanalyzer
+
+# server
+/server/node_modules
+/server/uploads
+/server/data.db
+/server/data.db-*

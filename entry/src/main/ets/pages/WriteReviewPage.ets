@@ -227,13 +227,19 @@ export struct WriteReviewPage {
     }
     this.submitting = true;
     try {
+      // 先上传图片拿到真实 URL，再提交评价
+      const urls: string[] = [];
+      for (const img of this.images) {
+        const url = await Api.uploadReviewImage(img);
+        urls.push(url);
+      }
       const dims: ReviewDimensions = new ReviewDimensions(this.tasteScore, this.portionScore, this.valueScore);
       const req: WriteReviewParam = {
         dishId: this.dishId,
         rating: this.rating,
         dimensions: dims,
         content: this.content,
-        images: this.images,
+        images: urls,
         isAnonymous: this.isAnonymous
       };
       await Api.submitReview(req);

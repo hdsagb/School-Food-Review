@@ -1,5 +1,8 @@
 import { http } from '@kit.NetworkKit';
+import { fileIo as fs } from '@kit.CoreFileKit';
+import { util } from '@kit.ArkTS';
 import { AppConfig } from '../config/AppConfig';
+import { PreferencesUtil } from '../utils/PreferencesUtil';
 
 export enum HttpMethod {
   GET = 'GET',
@@ -12,6 +15,11 @@ export interface ApiResult<T> {
   code: number;
   message: string;
   data: T;
+}
+
+/** 图片上传响应 */
+export interface UploadResult {
+  url: string;
 }
 
 export interface RequestOptions {
@@ -53,6 +61,9 @@ export class HttpClient {
    * @returns 解析后的业务数据
    */
   async request<T>(options: RequestOptions): Promise<T> {
+    if (!this.token) {
+      this.token = await PreferencesUtil.getString(AppConfig.PREF_KEY_TOKEN);
+    }
     const url = this.buildUrl(options.url, options.params);
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (options.headers) {
@@ -76,6 +87,7 @@ export class HttpClient {
       });
 
       if (response.responseCode >= 200 && response.responseCode < 300) {
+        await this.captureToken(response);
         const body = JSON.parse(response.result as string) as ApiResult<T>;
         if (body.code === 0) {
           return body.data;
@@ -98,6 +110,94 @@ export class HttpClient {
   /** POST 便捷方法 */
   post<T>(url: string, body?: Object): Promise<T> {
     return this.request<T>({ url, method: HttpMethod.POST, body });
+  }
+
+  /**
+   * 上传图片（multipart/form-data），返回可访问的图片 URL
+   * @param path 本地文件路径（photoUri）
+   */
+  async uploadImage(path: string, fieldName: string = 'file'): Promise<string> {
+    if (!this.token) {
+      this.token = await PreferencesUtil.getString(AppConfig.PREF_KEY_TOKEN);
+    }
+    const file = fs.openSync(path, fs.OpenMode.READ_ONLY);
+    const stat = fs.statSync(path);
+    const buf = new ArrayBuffer(stat.size);
+    fs.readSync(file.fd, buf);
+    fs.closeSync(file);
+
+    const boundary = `----Campus${Date.now().toString(16)}`;
+    const fileName = this.extractFileName(path);
+    const mime = this.guessMime(fileName);
+    const encoder = new util.TextEncoder();
+    const head = encoder.encode(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${fieldName}"; filename="${fileName}"\r\nContent-Type: ${mime}\r\n\r\n`);
+    const tail = encoder.encode(`\r\n--${boundary}--\r\n`);
+    const merged = new Uint8Array(head.byteLength + buf.byteLength + tail.byteLength);
+    merged.set(head, 0);
+    merged.set(new Uint8Array(buf), head.byteLength);
+    merged.set(tail, head.byteLength + buf.byteLength);
+
+    const url = `${AppConfig.API_BASE_URL}/upload`;
+    const headers: Record<string, string> = { 'Content-Type': `multipart/form-data; boundary=${boundary}` };
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+
+    const httpRequest = http.createHttp();
+    try {
+      const response = await httpRequest.request(url, {
+        method: http.RequestMethod.POST,
+        header: headers,
+        extraData: merged.buffer,
+        connectTimeout: AppConfig.HTTP_TIMEOUT,
+        readTimeout: AppConfig.HTTP_TIMEOUT
+      });
+      await this.captureToken(response);
+      if (response.responseCode >= 200 && response.responseCode < 300) {
+        const body = JSON.parse(response.result as string) as ApiResult<UploadResult>;
+        if (body.code === 0) {
+          return body.data.url;
+        }
+        throw new Error(body.message || '上传失败');
+      }
+      throw new Error(`HTTP ${response.responseCode}`);
+    } finally {
+      httpRequest.destroy();
+    }
+  }
+
+  /** 从响应头捕获后端下发的 X-Auth-Token 并持久化 */
+  private async captureToken(response: http.HttpResponse): Promise<void> {
+    const headerObj = response.header as Record<string, Object>;
+    if (!headerObj) return;
+    const keys: string[] = Object.keys(headerObj);
+    for (const k of keys) {
+      if (k.toLowerCase() === 'x-auth-token') {
+        const value = String(headerObj[k]);
+        if (value && value !== this.token) {
+          this.token = value;
+          await PreferencesUtil.putString(AppConfig.PREF_KEY_TOKEN, value);
+        }
+        break;
+      }
+    }
+  }
+
+  private extractFileName(path: string): string {
+    const idx = path.lastIndexOf('/');
+    const name = idx >= 0 ? path.substring(idx + 1) : path;
+    return name || 'photo.jpg';
+  }
+
+  private guessMime(fileName: string): string {
+    const lower = fileName.toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.heic')) return 'image/heic';
+    return 'application/octet-stream';
   }
 
   /** 拼接 URL 与查询参数 */

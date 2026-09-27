@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今日校园 · 管理后台</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; background: #f4f7f5; color: #223; }
+  header { background: #0f6b4f; color: #fff; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  #logout { background: rgba(255,255,255,.18); border: none; color: #fff; padding: 6px 14px; border-radius: 6px; cursor: pointer; }
+  nav { background: #fff; padding: 0 24px; display: flex; gap: 4px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+  nav button { border: none; background: none; padding: 14px 18px; font-size: 14px; cursor: pointer; color: #556; border-bottom: 3px solid transparent; }
+  nav button.active { color: #0f6b4f; border-bottom-color: #0f6b4f; font-weight: 600; }
+  main { padding: 20px 24px; max-width: 1100px; }
+  .card { background: #fff; border-radius: 10px; padding: 18px; box-shadow: 0 1px 4px rgba(0,0,0,.06); margin-bottom: 16px; }
+  .card h2 { font-size: 15px; margin-bottom: 12px; color: #334; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eef1ef; vertical-align: middle; }
+  th { color: #778; font-weight: 500; }
+  .btn { border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  .btn-primary { background: #0f6b4f; color: #fff; }
+  .btn-ghost { background: #eef3f0; color: #0f6b4f; }
+  .btn-danger { background: #fbecec; color: #c0392b; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .tag { display: inline-block; background: #eef6f2; color: #0f6b4f; border-radius: 10px; padding: 1px 8px; font-size: 11px; margin-right: 4px; }
+  .soldout { color: #c0392b; font-weight: 600; }
+  .form-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; align-items: center; }
+  .form-row label { font-size: 13px; color: #556; min-width: 64px; }
+  .form-row input, .form-row select, .form-row textarea {
+    border: 1px solid #d5ddd9; border-radius: 6px; padding: 6px 10px; font-size: 13px; flex: 1; min-width: 120px;
+  }
+  .form-row input[type=checkbox] { flex: 0; width: 16px; height: 16px; }
+  .form-row .inline { display: flex; align-items: center; gap: 4px; min-width: 90px; }
+  .toast { position: fixed; top: 20px; right: 20px; background: #333; color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .3s; }
+  .toast.show { opacity: 1; }
+  .muted { color: #889; font-size: 12px; }
+  #loginBox { max-width: 360px; margin: 80px auto; }
+  #loginBox h2 { margin-bottom: 16px; }
+  .hidden { display: none; }
+  .thumb { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; background: #eef1ef; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🍚 今日校园 · 管理后台</h1>
+  <div>
+    <span id="adminName" class="muted" style="color:#dfe8e4; margin-right:12px;"></span>
+    <button id="logout" class="hidden">退出登录</button>
+  </div>
+</header>
+
+<div id="loginBox" class="card">
+  <h2>管理员登录</h2>
+  <div class="form-row"><label>账号</label><input id="loginUser" placeholder="admin"></div>
+  <div class="form-row"><label>密码</label><input id="loginPass" type="password" placeholder="admin123"></div>
+  <button class="btn btn-primary" onclick="login()">登录</button>
+  <p class="muted" style="margin-top:10px;">默认账号：admin / admin123</p>
+</div>
+
+<div id="appBox" class="hidden">
+  <nav>
+    <button class="active" data-view="canteens">食堂</button>
+    <button data-view="stalls">档口</button>
+    <button data-view="dishes">菜品</button>
+    <button data-view="reviews">评价审核</button>
+  </nav>
+  <main>
+    <!-- 食堂 -->
+    <section id="view-canteens">
+      <div class="card">
+        <h2>新增食堂</h2>
+        <div class="form-row">
+          <input id="cName" placeholder="名称，如 第三食堂">
+          <input id="cLoc" placeholder="位置，如 校园南区">
+          <input id="cHours" placeholder="营业时间，如 06:30-21:00" style="max-width:160px;">
+          <input id="cFloors" type="number" placeholder="楼层" style="max-width:80px;">
+          <button class="btn btn-primary" onclick="saveCanteen()">保存</button>
+        </div>
+      </div>
+      <div class="card"><h2>食堂列表</h2><table>
+        <thead><tr><th>名称</th><th>位置</th><th>营业时间</th><th>楼层</th><th>操作</th></tr></thead>
+        <tbody id="canteenList"></tbody>
+      </table></div>
+    </section>
+    <!-- 档口 -->
+    <section id="view-stalls" class="hidden">
+      <div class="card">
+        <h2>新增档口</h2>
+        <div class="form-row">
+          <select id="sCanteen"></select>
+          <input id="sName" placeholder="档口名称">
+          <input id="sFloor" type="number" placeholder="楼层" style="max-width:80px;">
+          <input id="sCuisine" placeholder="菜系">
+          <button class="btn btn-primary" onclick="saveStall()">保存</button>
+        </div>
+      </div>
+      <div class="card"><h2>档口列表</h2><table>
+        <thead><tr><th>食堂</th><th>名称</th><th>楼层</th><th>菜系</th><th>操作</th></tr></thead>
+        <tbody id="stallList"></tbody>
+      </table></div>
+    </section>
+    <!-- 菜品 -->
+    <section id="view-dishes" class="hidden">
+      <div class="card">
+        <h2>新增菜品</h2>
+        <div class="form-row">
+          <select id="dCanteen" onchange="fillStallSelect()"></select>
+          <select id="dStall"></select>
+        </div>
+        <div class="form-row">
+          <input id="dName" placeholder="菜品名称">
+          <input id="dPrice" type="number" step="0.1" placeholder="价格" style="max-width:90px;">
+          <input id="dTags" placeholder="标签，逗号分隔，如 招牌,辣">
+          <input id="dCalories" type="number" placeholder="热量 kcal" style="max-width:110px;">
+        </div>
+        <div class="form-row">
+          <input id="dImage" placeholder="图片 URL（可上传）">
+          <input type="file" id="dImageFile" accept="image/*" style="flex:0;">
+          <button class="btn btn-ghost" onclick="uploadDishImage()">上传图片</button>
+          <span class="inline"><input type="checkbox" id="dSig"><label>招牌</label></span>
+          <span class="inline"><input type="checkbox" id="dVeg"><label>素食</label></span>
+          <span class="inline"><input type="checkbox" id="dSold"><label>售罄</label></span>
+        </div>
+        <div class="form-row"><input id="dAllergens" placeholder="过敏原，逗号分隔，如 花生,麸质"><button class="btn btn-primary" onclick="saveDish()">保存</button></div>
+      </div>
+      <div class="card"><h2>菜品列表</h2><table>
+        <thead><tr><th></th><th>名称</th><th>食堂/档口</th><th>价格</th><th>标签</th><th>评分</th><th>售罄</th><th>操作</th></tr></thead>
+        <tbody id="dishList"></tbody>
+      </table></div>
+    </section>
+    <!-- 评价审核 -->
+    <section id="view-reviews" class="hidden">
+      <div class="card"><h2>评价审核</h2><table>
+        <thead><tr><th>菜品</th><th>评分</th><th>内容</th><th>点赞</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
+        <tbody id="reviewList"></tbody>
+      </table></div>
+    </section>
+  </main>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const API = '/api';
+let token = localStorage.getItem('admin_token') || '';
+let curView = 'canteens';
+let editTarget = null; // 当前编辑对象 {type, id}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 1800); }
+async function api(path, method, body) {
+  const opt = { method: method || 'GET', headers: {} };
+  if (token) opt.headers['Authorization'] = 'Bearer ' + token;
+  if (body !== undefined) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body); }
+  const res = await fetch(API + path, opt);
+  const j = await res.json();
+  if (j.code !== 0) throw new Error(j.message || '请求失败');
+  return j.data;
+}
+function authHeaders() { return token ? { 'Authorization': 'Bearer ' + token } : {}; }
+
+// 登录
+async function login() {
+  const username = document.getElementById('loginUser').value.trim();
+  const password = document.getElementById('loginPass').value;
+  try {
+    const data = await api('/admin/login', 'POST', { username, password });
+    token = data.token;
+    localStorage.setItem('admin_token', token);
+    enterApp(data.username);
+    toast('登录成功');
+  } catch (e) { toast(e.message); }
+}
+function enterApp(name) {
+  document.getElementById('loginBox').classList.add('hidden');
+  document.getElementById('appBox').classList.remove('hidden');
+  document.getElementById('logout').classList.remove('hidden');
+  document.getElementById('adminName').textContent = name;
+  switchView('canteens');
+  loadAll();
+}
+function logout() {
+  token = ''; localStorage.removeItem('admin_token');
+  document.getElementById('appBox').classList.add('hidden');
+  document.getElementById('loginBox').classList.remove('hidden');
+  document.getElementById('logout').classList.add('hidden');
+}
+document.getElementById('logout').onclick = logout;
+
+// 视图切换
+function switchView(v) {
+  curView = v; editTarget = null;
+  document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
+  document.querySelectorAll('main section').forEach((s) => s.classList.add('hidden'));
+  document.getElementById('view-' + v).classList.remove('hidden');
+  loadView(v);
+}
+document.querySelectorAll('nav button').forEach((b) => b.onclick = () => switchView(b.dataset.view));
+
+async function loadAll() { await Promise.all([loadCanteens(), loadStalls(), loadDishes(), loadReviews()]); }
+function loadView(v) { ({ canteens: loadCanteens, stalls: loadStalls, dishes: loadDishes, reviews: loadReviews })[v](); }
+
+// 食堂
+async function loadCanteens() {
+  const list = await api('/admin/canteens');
+  document.getElementById('canteenList').innerHTML = list.map((c) => `
+    <tr>
+      <td><strong>${esc(c.name)}</strong></td><td>${esc(c.location)}</td><td>${esc(c.open_hours)}</td>
+      <td>${c.floors} 层</td>
+      <td><button class="btn btn-ghost btn-sm" onclick='editCanteen(${JSON.stringify(c).replace(/'/g, "&#39;")})'>编辑</button>
+          <button class="btn btn-danger btn-sm" onclick="delCanteen('${c.id}')">删除</button></td>
+    </tr>`).join('');
+}
+function editCanteen(c) {
+  editTarget = { type: 'canteen', id: c.id };
+  document.getElementById('cName').value = c.name;
+  document.getElementById('cLoc').value = c.location;
+  document.getElementById('cHours').value = c.open_hours;
+  document.getElementById('cFloors').value = c.floors;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+async function saveCanteen() {
+  const body = {
+    name: document.getElementById('cName').value.trim(),
+    location: document.getElementById('cLoc').value.trim(),
+    openHours: document.getElementById('cHours').value.trim(),
+    floors: parseInt(document.getElementById('cFloors').value) || 1
+  };
+  if (!body.name) return toast('名称不能为空');
+  try {
+    if (editTarget && editTarget.type === 'canteen') { await api('/admin/canteens/' + editTarget.id, 'PUT', body); editTarget = null; }
+    else { await api('/admin/canteens', 'POST', body); }
+    ['cName','cLoc','cHours','cFloors'].forEach((id) => document.getElementById(id).value = '');
+    await loadCanteens(); await loadStalls(); await loadDishes();
+    toast('已保存');
+  } catch (e) { toast(e.message); }
+}
+async function delCanteen(id) {
+  if (!confirm('删除该食堂将级联删除其档口、菜品与评价，确定？')) return;
+  try { await api('/admin/canteens/' + id, 'DELETE'); await loadAll(); toast('已删除'); } catch (e) { toast(e.message); }
+}
+
+// 档口
+async function fillCanteenSelect(selId, keep) {
+  const canteens = await api('/admin/canteens');
+  const sel = document.getElementById(selId);
+  sel.innerHTML = canteens.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  if (keep) sel.value = keep;
+  return canteens;
+}
+async function loadStalls() {
+  await fillCanteenSelect('sCanteen');
+  const stalls = await api('/admin/stalls');
+  const canteens = await api('/admin/canteens');
+  const nameOf = (id) => (canteens.find((c) => c.id === id) || {}).name || '-';
+  document.getElementById('stallList').innerHTML = stalls.map((s) => `
+    <tr>
+      <td>${esc(nameOf(s.canteen_id))}</td><td><strong>${esc(s.name)}</strong></td>
+      <td>${s.floor} 层</td><td>${esc(s.cuisine)}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick='editStall(${JSON.stringify(s).replace(/'/g, "&#39;")})'>编辑</button>
+          <button class="btn btn-danger btn-sm" onclick="delStall('${s.id}')">删除</button></td>
+    </tr>`).join('');
+}
+function editStall(s) {
+  editTarget = { type: 'stall', id: s.id };
+  document.getElementById('sCanteen').value = s.canteen_id;
+  document.getElementById('sName').value = s.name;
+  document.getElementById('sFloor').value = s.floor;
+  document.getElementById('sCuisine').value = s.cuisine;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+async function saveStall() {
+  const body = {
+    canteenId: document.getElementById('sCanteen').value,
+    name: document.getElementById('sName').value.trim(),
+    floor: parseInt(document.getElementById('sFloor').value) || 1,
+    cuisine: document.getElementById('sCuisine').value.trim()
+  };
+  if (!body.name) return toast('名称不能为空');
+  try {
+    if (editTarget && editTarget.type === 'stall') { await api('/admin/stalls/' + editTarget.id, 'PUT', body); editTarget = null; }
+    else { await api('/admin/stalls', 'POST', body); }
+    ['sName','sFloor','sCuisine'].forEach((id) => document.getElementById(id).value = '');
+    await loadStalls(); await loadDishes();
+    toast('已保存');
+  } catch (e) { toast(e.message); }
+}
+async function delStall(id) {
+  if (!confirm('删除该档口将级联删除其菜品与评价，确定？')) return;
+  try { await api('/admin/stalls/' + id, 'DELETE'); await loadStalls(); await loadDishes(); toast('已删除'); } catch (e) { toast(e.message); }
+}
+
+// 菜品
+async function fillStallSelect() {
+  const cid = document.getElementById('dCanteen').value;
+  if (!cid) return;
+  const stalls = await api('/admin/stalls?canteenId=' + cid);
+  document.getElementById('dStall').innerHTML = stalls.map((s) => `<option value="${s.id}">${esc(s.name)}（${s.floor} 层）</option>`).join('');
+}
+async function loadDishes() {
+  const canteens = await fillCanteenSelect('dCanteen');
+  await fillStallSelect();
+  const dishes = await api('/admin/dishes');
+  const cNameOf = (id) => (canteens.find((c) => c.id === id) || {}).name || '-';
+  document.getElementById('dishList').innerHTML = dishes.map((d) => `
+    <tr>
+      <td><img class="thumb" src="${esc(d.image)}" onerror="this.style.visibility='hidden'"></td>
+      <td><strong>${esc(d.name)}</strong> ${d.isSignature ? '<span class="tag">招牌</span>' : ''}</td>
+      <td>${esc(d.canteenName)} / ${esc(d.stallName)}</td>
+      <td>¥${d.price.toFixed(1)}</td>
+      <td>${(d.tags || []).map((t) => '<span class="tag">' + esc(t) + '</span>').join('')}</td>
+      <td>${d.rating.toFixed(1)}（${d.reviewCount}）</td>
+      <td class="${d.soldOut ? 'soldout' : 'muted'}">${d.soldOut ? '已售罄' : '在售'}</td>
+      <td>
+        <button class="btn btn-ghost btn-sm" onclick="toggleSold('${d.id}', ${d.soldOut})">${d.soldOut ? '恢复在售' : '设为售罄'}</button>
+        <button class="btn btn-ghost btn-sm" onclick='editDish(${JSON.stringify(d).replace(/'/g, "&#39;")})'>编辑</button>
+        <button class="btn btn-danger btn-sm" onclick="delDish('${d.id}')">删除</button>
+      </td>
+    </tr>`).join('');
+}
+function editDish(d) {
+  editTarget = { type: 'dish', id: d.id };
+  document.getElementById('dCanteen').value = d.canteenId;
+  fillStallSelect().then(() => { document.getElementById('dStall').value = d.stallId; });
+  document.getElementById('dName').value = d.name;
+  document.getElementById('dPrice').value = d.price;
+  document.getElementById('dTags').value = (d.tags || []).join(',');
+  document.getElementById('dCalories').value = d.calories;
+  document.getElementById('dImage').value = d.image;
+  document.getElementById('dSig').checked = !!d.isSignature;
+  document.getElementById('dVeg').checked = !!d.isVegetarian;
+  document.getElementById('dSold').checked = !!d.soldOut;
+  document.getElementById('dAllergens').value = (d.allergens || []).join(',');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+async function saveDish() {
+  const canteenId = document.getElementById('dCanteen').value;
+  const stallId = document.getElementById('dStall').value;
+  const body = {
+    canteenId, stallId,
+    name: document.getElementById('dName').value.trim(),
+    price: parseFloat(document.getElementById('dPrice').value) || 0,
+    tags: document.getElementById('dTags').value.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
+    calories: parseInt(document.getElementById('dCalories').value) || 0,
+    image: document.getElementById('dImage').value.trim(),
+    isSignature: document.getElementById('dSig').checked,
+    isVegetarian: document.getElementById('dVeg').checked,
+    soldOut: document.getElementById('dSold').checked,
+    allergens: document.getElementById('dAllergens').value.split(/[,，]/).map((s) => s.trim()).filter(Boolean)
+  };
+  if (!body.name) return toast('名称不能为空');
+  try {
+    if (editTarget && editTarget.type === 'dish') { await api('/admin/dishes/' + editTarget.id, 'PUT', body); editTarget = null; }
+    else { await api('/admin/dishes', 'POST', body); }
+    ['dName','dPrice','dTags','dCalories','dImage','dAllergens'].forEach((id) => document.getElementById(id).value = '');
+    ['dSig','dVeg','dSold'].forEach((id) => document.getElementById(id).checked = false);
+    await loadDishes();
+    toast('已保存');
+  } catch (e) { toast(e.message); }
+}
+async function toggleSold(id, cur) {
+  try { await api('/admin/dishes/' + id, 'PUT', { soldOut: !cur }); await loadDishes(); toast(cur ? '已恢复在售' : '已设为售罄'); } catch (e) { toast(e.message); }
+}
+async function delDish(id) {
+  if (!confirm('删除该菜品及其全部评价，确定？')) return;
+  try { await api('/admin/dishes/' + id, 'DELETE'); await loadDishes(); toast('已删除'); } catch (e) { toast(e.message); }
+}
+async function uploadDishImage() {
+  const file = document.getElementById('dImageFile').files[0];
+  if (!file) return toast('请先选择图片');
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch(API + '/upload', { method: 'POST', headers: authHeaders(), body: fd });
+    const j = await res.json();
+    if (j.code !== 0) throw new Error(j.message || '上传失败');
+    document.getElementById('dImage').value = j.data.url;
+    toast('图片已上传');
+  } catch (e) { toast(e.message); }
+}
+
+// 评价审核
+async function loadReviews() {
+  const list = await api('/admin/reviews');
+  document.getElementById('reviewList').innerHTML = list.map((r) => `
+    <tr>
+      <td>${esc(r.dishName)}</td><td>${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</td>
+      <td>${esc(r.content)}</td><td>👍 ${r.likes}</td>
+      <td>${r.status === 'approved' ? '<span class="tag">已通过</span>' : '<span class="soldout">已拒绝</span>'}</td>
+      <td class="muted">${new Date(r.createTime).toLocaleString()}</td>
+      <td>
+        <button class="btn btn-ghost btn-sm" onclick="setReviewStatus('${r.id}','approved')">通过</button>
+        <button class="btn btn-danger btn-sm" onclick="setReviewStatus('${r.id}','rejected')">拒绝</button>
+      </td>
+    </tr>`).join('');
+}
+async function setReviewStatus(id, status) {
+  try { await api('/admin/reviews/' + id + '/status', 'PUT', { status }); await loadReviews(); toast('已更新'); } catch (e) { toast(e.message); }
+}
+
+// 启动
+(async function init() {
+  if (token) {
+    try {
+      await api('/admin/canteens');
+      enterApp('管理员');
+    } catch (e) {
+      // token 失效则要求重新登录
+      token = ''; localStorage.removeItem('admin_token');
+    }
+  }
+})();
+</script>
+</body>
+</html>

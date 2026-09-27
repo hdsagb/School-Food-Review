@@ -62,7 +62,10 @@ export class Api {
 
   static async getMyReviews(): Promise<MyReviewItem[]> {
     if (AppConfig.USE_MOCK) return MockData.getMyReviews();
-    return Api.client.get<MyReviewItem[]>('/user/reviews');
+    const list = await Api.client.get<MyReviewItem[]>('/user/reviews');
+    AppStorage.setOrCreate<MyReviewItem[]>('myReviews', list);
+    AppStorage.setOrCreate<number>('myReviewCount', list.length);
+    return list;
   }
 
   static async getLocalUser(): Promise<User> {
@@ -72,7 +75,9 @@ export class Api {
 
   static async getFavorites(): Promise<string[]> {
     if (AppConfig.USE_MOCK) return MockData.getFavorites();
-    return Api.client.get<string[]>('/user/favorites');
+    const favs = await Api.client.get<string[]>('/user/favorites');
+    AppStorage.setOrCreate<string[]>('favorites', favs);
+    return favs;
   }
 
   static async getFavoriteDishes(): Promise<Dish[]> {
@@ -83,6 +88,14 @@ export class Api {
   static async toggleFavorite(dishId: string): Promise<string[]> {
     if (AppConfig.USE_MOCK) return MockData.toggleFavorite(dishId);
     const body: Record<string, string> = { 'dishId': dishId };
-    return Api.client.post<string[]>('/user/favorites', body);
+    const favs = await Api.client.post<string[]>('/user/favorites', body);
+    AppStorage.setOrCreate<string[]>('favorites', favs);
+    return favs;
+  }
+
+  /** 上传评价图片，返回可访问 URL（Mock 模式直接返回原路径） */
+  static async uploadReviewImage(path: string): Promise<string> {
+    if (AppConfig.USE_MOCK) return path;
+    return Api.client.uploadImage(path);
   }
 }

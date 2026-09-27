@@ -2,11 +2,15 @@
  * 应用全局配置
  */
 export class AppConfig {
-  /** 后端 API 基础地址 */
-  static readonly API_BASE_URL: string = 'https://campus.example.com/api';
+  /**
+   * 后端 API 基础地址
+   * - 模拟器访问宿主机：http://10.0.2.2:3000/api
+   * - 真机（同一局域网）需改为电脑局域网 IP，如 http://192.168.x.x:3000/api
+   */
+  static readonly API_BASE_URL: string = 'http://10.0.2.2:3000/api';
 
-  /** 是否使用 Mock 数据（未对接后端前为 true） */
-  static readonly USE_MOCK: boolean = true;
+  /** 是否使用 Mock 数据（接入后端后为 false） */
+  static readonly USE_MOCK: boolean = false;
 
   /** 网络超时时间（毫秒） */
   static readonly HTTP_TIMEOUT: number = 10000;
@@ -37,4 +41,5 @@ export class AppConfig {
   static readonly PREF_KEY_LIKED_REVIEWS = 'liked_reviews';
   static readonly PREF_KEY_MY_REVIEWS = 'my_reviews';
   static readonly PREF_KEY_DARK_MODE = 'dark_mode';
+  static readonly PREF_KEY_TOKEN = 'auth_token';
 }
