@@ -42,4 +42,5 @@ export class AppConfig {
   static readonly PREF_KEY_MY_REVIEWS = 'my_reviews';
   static readonly PREF_KEY_DARK_MODE = 'dark_mode';
   static readonly PREF_KEY_TOKEN = 'auth_token';
+  static readonly PREF_KEY_PRIVACY_AGREED = 'privacy_agreed';
 }

@@ -8,6 +8,7 @@ import { getCurrentMealType } from '../utils/CommonUtil';
 import { ThemeUtil } from '../utils/ThemeUtil';
 import { PreferencesUtil } from '../utils/PreferencesUtil';
 import { AppConfig } from '../config/AppConfig';
+import { common } from '@kit.AbilityKit';
 import { DishDetailPage } from './DishDetailPage';
 import { WriteReviewPage } from './WriteReviewPage';
 import { ProfilePage } from './ProfilePage';
@@ -33,6 +34,7 @@ struct Index {
   @State dishes: Dish[] = [];
   @State loading: boolean = true;
   @State error: string = '';
+  @State showPrivacySheet: boolean = false;
   @StorageLink('favorites') favorites: string[] = [];
   @StorageLink('darkMode') darkMode: boolean = false;
   @State searchKeyword: string = '';
@@ -51,11 +53,45 @@ struct Index {
   private searchTimer: number = -1;
 
   async aboutToAppear(): Promise<void> {
+    // 隐私门控：未同意《隐私声明》前不加载任何数据、不发起网络请求
+    const agreed: string = await PreferencesUtil.getString(AppConfig.PREF_KEY_PRIVACY_AGREED, 'false');
+    if (agreed !== 'true') {
+      this.loading = false;
+      this.showPrivacySheet = true;
+      return;
+    }
+    await this.loadAll();
+  }
+
+  /** 加载首页全部数据（隐私同意后调用） */
+  private async loadAll(): Promise<void> {
     await this.loadCanteens();
     await this.loadStalls();
     await this.loadMenu();
     this.favorites = await Api.getFavorites();
     this.searchHistory = await PreferencesUtil.getSearchHistory();
+  }
+
+  /** 拦截返回键：隐私弹窗展示期间必须显式选择 */
+  onBackPress(): boolean {
+    return this.showPrivacySheet;
+  }
+
+  /** 同意隐私声明并进入应用 */
+  private async agreePrivacy(): Promise<void> {
+    await PreferencesUtil.putString(AppConfig.PREF_KEY_PRIVACY_AGREED, 'true');
+    this.showPrivacySheet = false;
+    await this.loadAll();
+  }
+
+  /** 不同意则退出应用 */
+  private declinePrivacy(): void {
+    try {
+      const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      ctx.terminateSelf();
+    } catch (e) {
+      console.warn('terminateSelf failed (maybe in previewer): ' + (e as Error).message);
+    }
   }
 
   /** 页面重新显示时刷新收藏，保证从详情页返回后红心同步 */
@@ -232,6 +268,90 @@ struct Index {
     .mode(NavigationMode.Stack)
     .hideTitleBar(true)
     .navDestination(this.PagesMap)
+    .bindSheet(this.showPrivacySheet, (): void => { this.PrivacySheet(); }, {
+      height: SheetSize.MEDIUM,
+      showClose: false,
+      dragBar: false,
+      backgroundColor: ThemeUtil.cardBg(this.darkMode),
+      // 拦截下滑/返回等交互式关闭，必须显式点击同意或不同意
+      onWillDismiss: (_action: SheetDismiss): void => {}
+    })
+  }
+
+  @Builder PrivacySheet() {
+    Column({ space: 14 }) {
+      Text('🛡️ 欢迎使用校园食评')
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(ThemeUtil.textPrimary(this.darkMode))
+        .width('100%')
+
+      Text('在你使用前，请阅读并同意《用户协议》与《隐私声明》：')
+        .fontSize($r('app.float.body_text'))
+        .fontColor(ThemeUtil.textSecondary(this.darkMode))
+        .width('100%')
+
+      Column({ space: 8 }) {
+        Text('· 仅收集昵称、评价内容与图片等必要信息，用于提供菜品评价服务')
+          .fontSize($r('app.float.caption_text'))
+          .fontColor(ThemeUtil.textSecondary(this.darkMode))
+        Text('· 你的评价与昵称将公开显示，不用于其他用途')
+          .fontSize($r('app.float.caption_text'))
+          .fontColor(ThemeUtil.textSecondary(this.darkMode))
+        Text('· 相机/相册权限仅在发布评价配图时使用')
+          .fontSize($r('app.float.caption_text'))
+          .fontColor(ThemeUtil.textSecondary(this.darkMode))
+        Text('· 可随时在「我的」页面删除自己发布的评价')
+          .fontSize($r('app.float.caption_text'))
+          .fontColor(ThemeUtil.textSecondary(this.darkMode))
+      }
+      .width('100%')
+      .padding(12)
+      .borderRadius(12)
+      .backgroundColor(ThemeUtil.tagBg(this.darkMode))
+
+      Text('查看完整《隐私声明》 >')
+        .fontSize($r('app.float.caption_text'))
+        .fontColor(ThemeUtil.brandDeep(this.darkMode))
+        .onClick((): void => { this.pathStack.pushPathByName('Privacy', ''); })
+
+      Blank()
+        .layoutWeight(1)
+
+      Row({ space: 12 }) {
+        Text('不同意并退出')
+          .fontSize($r('app.float.body_text'))
+          .fontColor(ThemeUtil.textHint(this.darkMode))
+          .textAlign(TextAlign.Center)
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(21)
+          .border({ width: 1, color: ThemeUtil.divider(this.darkMode) })
+          .onClick((): void => { this.declinePrivacy(); })
+
+        Text('同意并继续')
+          .fontSize($r('app.float.body_text'))
+          .fontColor(Color.White)
+          .fontWeight(FontWeight.Medium)
+          .textAlign(TextAlign.Center)
+          .layoutWeight(1)
+          .height(42)
+          .borderRadius(21)
+          .linearGradient({
+            angle: 135,
+            colors: [
+              [$r('app.color.brand_gradient_start'), 0.0],
+              [$r('app.color.brand_gradient_end'), 1.0]
+            ]
+          })
+          .onClick((): void => { this.agreePrivacy(); })
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .height('100%')
+    .padding({ left: 20, right: 20, top: 22, bottom: 24 })
+    .alignItems(HorizontalAlign.Start)
   }
 
   @Builder PagesMap(name: string) {
