@@ -21,6 +21,7 @@ export struct DishDetailPage {
   @State loadingMore: boolean = false;
   @StorageLink('favorites') favorites: string[] = [];
   @StorageLink('darkMode') darkMode: boolean = false;
+  @StorageLink('isGuest') isGuest: boolean = true;
   @State likedIds: string[] = [];
   @State previewVisible: boolean = false;
   @State previewImages: string[] = [];
@@ -64,6 +65,10 @@ export struct DishDetailPage {
 
   /** 点赞/取消点赞某条评价 */
   private async toggleLike(reviewId: string): Promise<void> {
+    if (this.isGuest) {
+      this.promptLogin('点赞评价需要登录');
+      return;
+    }
     const liked = this.likedIds.includes(reviewId);
     const next: string[] = this.likedIds.slice();
     if (liked) {
@@ -342,6 +347,10 @@ export struct DishDetailPage {
   }
 
   private async toggleFavorite(): Promise<void> {
+    if (this.isGuest) {
+      this.promptLogin('收藏菜品需要登录');
+      return;
+    }
     const favs: string[] = await Api.toggleFavorite(this.dishId);
     this.favorites = favs;
     await PreferencesUtil.saveFavorites(favs);
@@ -353,6 +362,29 @@ export struct DishDetailPage {
   }
 
   private goWriteReview(): void {
+    if (this.isGuest) {
+      this.promptLogin('发布评价需要登录');
+      return;
+    }
     this.pathStack.pushPathByName('WriteReview', this.dishId);
+  }
+
+  /** 游客写操作拦截：确认后前往登录页 */
+  private promptLogin(message: string): void {
+    AlertDialog.show({
+      message: message,
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      primaryButton: {
+        value: '暂不',
+        action: (): void => {}
+      },
+      secondaryButton: {
+        value: '去登录',
+        fontColor: Color.White,
+        backgroundColor: $r('app.color.brand_primary_dark'),
+        action: (): void => { this.pathStack.pushPathByName('Login', ''); }
+      }
+    });
   }
 }

@@ -4,7 +4,7 @@
  */
 const express = require('express');
 const db = require('../db');
-const { parseBearer, genToken, guestAuth } = require('../auth');
+const { parseBearer, genToken, guestAuth, registeredAuth, hashPassword, verifyPassword } = require('../auth');
 
 const router = express.Router();
 
@@ -139,8 +139,8 @@ router.get('/dishes/:dishId/reviews', (req, res) => {
   ok(res, { list: rows.map(reviewRowToModel), total, page, pageSize, hasMore: page * pageSize < total });
 });
 
-// POST /api/reviews 提交评价
-router.post('/reviews', guestAuth, (req, res) => {
+// POST /api/reviews 提交评价（仅注册用户）
+router.post('/reviews', registeredAuth, (req, res) => {
   const { dishId, rating, dimensions, content, images, isAnonymous } = req.body || {};
   if (!dishId || typeof rating !== 'number' || !content) return fail(res, 400, '参数不完整');
   if (!db.prepare('SELECT id FROM dishes WHERE id = ?').get(dishId)) return fail(res, 404, '菜品不存在');
@@ -166,8 +166,8 @@ router.post('/reviews', guestAuth, (req, res) => {
   ok(res, reviewRowToModel(db.prepare(`${REVIEW_SELECT} WHERE r.id = ?`).get(id)));
 });
 
-// POST /api/reviews/:reviewId/like 点赞/取消，返回最新点赞数
-router.post('/reviews/:reviewId/like', guestAuth, (req, res) => {
+// POST /api/reviews/:reviewId/like 点赞/取消，返回最新点赞数（仅注册用户）
+router.post('/reviews/:reviewId/like', registeredAuth, (req, res) => {
   const reviewId = req.params.reviewId;
   const r = db.prepare('SELECT id, likes FROM reviews WHERE id = ?').get(reviewId);
   if (!r) return fail(res, 404, '评价不存在');
@@ -196,7 +196,13 @@ router.get('/user/profile', (req, res) => {
     user = { id, nickname, avatar: '' };
   }
   res.set('X-Auth-Token', user.id);
-  ok(res, { id: user.id, nickname: user.nickname, avatar: user.avatar || '', favorites: favoritesOf(user.id) });
+  ok(res, {
+    id: user.id,
+    nickname: user.nickname,
+    avatar: user.avatar || '',
+    username: user.username || '',
+    favorites: favoritesOf(user.id)
+  });
 });
 
 // GET /api/user/reviews 我的评价
@@ -223,8 +229,8 @@ router.get('/user/favorites/dishes', guestAuth, (req, res) => {
   ok(res, rows.map(dishRowToModel));
 });
 
-// POST /api/user/favorites { dishId }
-router.post('/user/favorites', guestAuth, (req, res) => {
+// POST /api/user/favorites { dishId }（仅注册用户）
+router.post('/user/favorites', registeredAuth, (req, res) => {
   const { dishId } = req.body || {};
   if (!dishId) return fail(res, 400, '参数不完整');
   const exists = db.prepare('SELECT 1 AS x FROM user_favorites WHERE user_id = ? AND dish_id = ?').get(req.user.id, dishId);
@@ -234,6 +240,57 @@ router.post('/user/favorites', guestAuth, (req, res) => {
     db.prepare('INSERT INTO user_favorites (user_id, dish_id) VALUES (?, ?)').run(req.user.id, dishId);
   }
   ok(res, favoritesOf(req.user.id));
+});
+
+// ---------- 注册 / 登录 ----------
+
+function userPayload(user) {
+  return {
+    id: user.id,
+    nickname: user.nickname,
+    avatar: user.avatar || '',
+    username: user.username || '',
+    favorites: favoritesOf(user.id)
+  };
+}
+
+// POST /api/auth/register { username, password, nickname? }
+router.post('/auth/register', (req, res) => {
+  const { username, password, nickname } = req.body || {};
+  const uname = String(username || '').trim();
+  const pwd = String(password || '');
+  const nick = String(nickname || '').trim();
+  if (!/^[a-zA-Z0-9_]{3,20}$/.test(uname)) {
+    return res.json({ code: 1, message: '用户名需为 3-20 位字母、数字或下划线' });
+  }
+  if (pwd.length < 6 || pwd.length > 64) {
+    return res.json({ code: 1, message: '密码长度需为 6-64 位' });
+  }
+  if (nick.length > 20) {
+    return res.json({ code: 1, message: '昵称最长 20 字' });
+  }
+  if (db.prepare('SELECT id FROM users WHERE username = ?').get(uname)) {
+    return res.json({ code: 1, message: '用户名已被注册' });
+  }
+  const id = genToken();
+  const finalNick = nick || ('同学' + Math.floor(Math.random() * 1000));
+  db.prepare('INSERT INTO users (id, nickname, avatar, username, password_hash) VALUES (?, ?, ?, ?, ?)')
+    .run(id, finalNick, '', uname, hashPassword(pwd));
+  res.set('X-Auth-Token', id);
+  ok(res, { token: id, user: userPayload(db.prepare('SELECT * FROM users WHERE id = ?').get(id)) });
+});
+
+// POST /api/auth/login { username, password }
+router.post('/auth/login', (req, res) => {
+  const { username, password } = req.body || {};
+  const uname = String(username || '').trim();
+  const pwd = String(password || '');
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(uname);
+  if (!user || !verifyPassword(pwd, user.password_hash)) {
+    return res.json({ code: 1, message: '用户名或密码错误' });
+  }
+  res.set('X-Auth-Token', user.id);
+  ok(res, { token: user.id, user: userPayload(user) });
 });
 
 module.exports = router;

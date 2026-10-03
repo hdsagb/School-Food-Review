@@ -51,7 +51,9 @@ CREATE TABLE IF NOT EXISTS dishes (
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   nickname TEXT NOT NULL,
-  avatar TEXT DEFAULT ''
+  avatar TEXT DEFAULT '',
+  username TEXT DEFAULT '',
+  password_hash TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS user_favorites (
@@ -93,6 +95,12 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
   admin_id INTEGER NOT NULL
 );
 `);
+
+// ---------- 旧库迁移：users 表补 username / password_hash 列（已存在则忽略报错） ----------
+try { db.exec(`ALTER TABLE users ADD COLUMN username TEXT DEFAULT ''`); } catch (e) { /* 列已存在 */ }
+try { db.exec(`ALTER TABLE users ADD COLUMN password_hash TEXT DEFAULT ''`); } catch (e) { /* 列已存在 */ }
+// 注册用户名唯一（游客 username 为空串，不参与唯一约束）
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username <> ''`);
 
 /** 判断是否需要播种（以 dishes 表为空为准） */
 function needSeed() {

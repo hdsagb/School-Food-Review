@@ -4,6 +4,7 @@
  * - adminAuth：管理端登录态（Authorization: Bearer <session-token>）
  */
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
 const db = require('./db');
 
 /** 从请求头解析 Bearer Token */
@@ -61,4 +62,30 @@ function authAny(req, res, next) {
   return res.status(401).json({ code: 1, message: '登录已失效' });
 }
 
-module.exports = { parseBearer, genToken, guestAuth, adminAuth, authAny };
+/** 密码哈希（bcrypt，与管理端一致） */
+function hashPassword(password) {
+  return bcrypt.hashSync(password, 10);
+}
+
+/** 校验密码 */
+function verifyPassword(password, stored) {
+  if (!stored) return false;
+  try {
+    return bcrypt.compareSync(password, stored);
+  } catch (e) {
+    return false;
+  }
+}
+
+/** 注册用户鉴权：游客 token 仅可浏览，写操作要求已注册账号（code=2 引导登录） */
+function registeredAuth(req, res, next) {
+  guestAuth(req, res, () => {
+    if (!req.user.username) {
+      res.json({ code: 2, message: '该操作需要登录后使用' });
+      return;
+    }
+    next();
+  });
+}
+
+module.exports = { parseBearer, genToken, guestAuth, adminAuth, authAny, registeredAuth, hashPassword, verifyPassword };

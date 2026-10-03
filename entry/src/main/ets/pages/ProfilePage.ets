@@ -14,6 +14,7 @@ export struct ProfilePage {
   @StorageLink('darkMode') darkMode: boolean = false;
   @StorageLink('myReviewCount') myReviewCount: number = 0;
   @StorageLink('favorites') favorites: string[] = [];
+  @StorageLink('isGuest') isGuest: boolean = true;
 
   async aboutToAppear(): Promise<void> {
     if (AppConfig.USE_MOCK) {
@@ -87,7 +88,7 @@ export struct ProfilePage {
             .backgroundColor(Color.Transparent)
             .padding(0)
             .onChange((v: string): void => { this.nickname = v; })
-          Text('🌱 游客模式 · 仅本地保存')
+          Text(this.isGuest ? '🌱 游客模式 · 登录后可收藏评价' : `👤 ${this.user?.username ?? ''} · 已登录`)
             .fontSize($r('app.float.caption_text'))
             .fontColor(ThemeUtil.textHint(this.darkMode))
         }
@@ -106,6 +107,11 @@ export struct ProfilePage {
       .borderRadius($r('app.float.corner_card'))
       .shadow({ radius: 10, color: 'rgba(28,59,48,0.06)', offsetX: 0, offsetY: 3 })
 
+      if (this.isGuest) {
+        this.MenuItem('🔐 登录 / 注册', '', (): void => { this.goLogin(); })
+      } else {
+        this.MenuItem('🚪 退出登录', '', (): void => { this.confirmLogout(); })
+      }
       this.MenuItem('📝 我的评价', `${this.myReviewCount} 条`, (): void => { this.goMyReviews(); })
       this.MenuItem('⭐ 我的收藏', `${this.favorites.length} 道`, (): void => { this.goFavorites(); })
       this.MenuItem('🧹 清除缓存', '', (): void => { this.clearCache(); })
@@ -122,7 +128,15 @@ export struct ProfilePage {
     .onReady((ctx: NavDestinationContext) => {
       this.pathStack = ctx.pathStack;
     })
-    .onShown((): void => { this.refreshCounts(); })
+    .onShown((): void => {
+      // 登录/注册/退出返回后同步最新用户态（Api 层已写入 AppStorage）
+      const cached: Object | undefined = AppStorage.get<Object>('localUser');
+      if (cached) {
+        this.user = cached as User;
+        this.nickname = this.user.nickname;
+      }
+      this.refreshCounts();
+    })
   }
 
   @Builder MenuItem(label: string, value: string, onTap: () => void) {
@@ -186,6 +200,40 @@ export struct ProfilePage {
 
   private goPrivacy(): void {
     this.pathStack.pushPathByName('Privacy', '');
+  }
+
+  private goLogin(): void {
+    this.pathStack.pushPathByName('Login', '');
+  }
+
+  private confirmLogout(): void {
+    AlertDialog.show({
+      message: '确定退出登录？退出后将回到游客模式',
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      primaryButton: {
+        value: '取消',
+        action: (): void => {}
+      },
+      secondaryButton: {
+        value: '退出',
+        fontColor: Color.White,
+        backgroundColor: $r('app.color.brand_primary_dark'),
+        action: (): void => { this.doLogout(); }
+      }
+    });
+  }
+
+  /** 退出登录：清除 token 回到游客模式（isGuest 经 AppStorage 自动刷新） */
+  private async doLogout(): Promise<void> {
+    try {
+      this.user = await Api.logout();
+      this.nickname = this.user.nickname;
+      await PreferencesUtil.saveFavorites([]);
+      AppStorage.setOrCreate<string[]>('favorites', []);
+    } catch (e) {
+      console.error('logout error: ' + (e as Error).message);
+    }
   }
 
   private goFavorites(): void {

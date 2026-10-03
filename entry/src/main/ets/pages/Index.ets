@@ -15,6 +15,7 @@ import { ProfilePage } from './ProfilePage';
 import { MyReviewsPage } from './MyReviewsPage';
 import { FavoritesPage } from './FavoritesPage';
 import { PrivacyPage } from './PrivacyPage';
+import { LoginPage } from './LoginPage';
 
 /** 菜单缓存结构（离线兜底） */
 interface MenuCache {
@@ -37,6 +38,7 @@ struct Index {
   @State showPrivacySheet: boolean = false;
   @StorageLink('favorites') favorites: string[] = [];
   @StorageLink('darkMode') darkMode: boolean = false;
+  @StorageLink('isGuest') isGuest: boolean = true;
   @State searchKeyword: string = '';
   @State searchHistory: string[] = [];
   @State stalls: Stall[] = [];
@@ -70,6 +72,12 @@ struct Index {
     await this.loadMenu();
     this.favorites = await Api.getFavorites();
     this.searchHistory = await PreferencesUtil.getSearchHistory();
+    // 初始化用户态（isGuest/localUser 经 AppStorage 响应式共享）
+    try {
+      await Api.getLocalUser();
+    } catch (e) {
+      console.error('getLocalUser error: ' + (e as Error).message);
+    }
   }
 
   /** 拦截返回键：隐私弹窗展示期间必须显式选择 */
@@ -367,6 +375,8 @@ struct Index {
       FavoritesPage()
     } else if (name === 'Privacy') {
       PrivacyPage()
+    } else if (name === 'Login') {
+      LoginPage()
     }
   }
 
@@ -677,8 +687,31 @@ struct Index {
   }
 
   private async toggleFavorite(dishId: string): Promise<void> {
+    if (this.isGuest) {
+      this.promptLogin('收藏菜品需要登录');
+      return;
+    }
     this.favorites = await Api.toggleFavorite(dishId);
     await PreferencesUtil.saveFavorites(this.favorites);
+  }
+
+  /** 游客写操作拦截：确认后前往登录页 */
+  private promptLogin(message: string): void {
+    AlertDialog.show({
+      message: message,
+      autoCancel: true,
+      alignment: DialogAlignment.Center,
+      primaryButton: {
+        value: '暂不',
+        action: (): void => {}
+      },
+      secondaryButton: {
+        value: '去登录',
+        fontColor: Color.White,
+        backgroundColor: $r('app.color.brand_primary_dark'),
+        action: (): void => { this.pathStack.pushPathByName('Login', ''); }
+      }
+    });
   }
 
   private goDetail(dishId: string): void {
