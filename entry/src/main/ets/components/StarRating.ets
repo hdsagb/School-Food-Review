@@ -1,5 +1,3 @@
-import { ThemeUtil } from '../utils/ThemeUtil';
-
 @Component
 export struct StarRating {
   @Prop rating: number = 0;
@@ -17,20 +15,17 @@ export struct StarRating {
   }
 
   @Builder StarIcon(idx: number) {
-    // 用文字星符：实心★表示点亮、空心☆表示未点亮；文字可直接着色（Image+fillColor 对位图无效）
-    Text(this.rating - idx >= 0.5 ? '★' : '☆')
-      .fontSize(this.starSize)
-      .fontColor(this.getStarColor(idx))
+    // 图标仍用应用图标位图；位图无法用 fillColor 着色（原「1 星与 5 星相同」的根因），
+    // 改用 opacity 区分点亮(1.0)与未点亮(0.25)，保证 1~5 星可分辨
+    Image($r('app.media.startIcon'))
+      .width(this.starSize)
+      .height(this.starSize)
+      .objectFit(ImageFit.Contain)
+      .opacity(this.rating - idx >= 0.5 ? 1 : 0.25)
       .onClick((): void => {
         if (!this.readonly) {
           this.doStarChange(idx + 1);
         }
       })
-  }
-
-  private getStarColor(idx: number): ResourceStr {
-    const v = this.rating - idx;
-    if (v >= 0.5) return $r('app.color.star_active');
-    return ThemeUtil.starInactive(this.darkMode);
   }
 }

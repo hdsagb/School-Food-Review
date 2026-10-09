@@ -94,7 +94,19 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
   token TEXT PRIMARY KEY,
   admin_id INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 `);
+
+// ---------- 系统设置默认值（幂等：已存在则不覆盖，管理员改过的值不受影响） ----------
+db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_review_limit', '50')").run();
+db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('monthly_review_limit', '400')").run();
+
+// 提交评价前按 (user_id, create_time) 统计当日/当月条数，建复合索引避免全表扫描
+db.exec(`CREATE INDEX IF NOT EXISTS idx_reviews_user_time ON reviews(user_id, create_time)`);
 
 // ---------- 旧库迁移：users 表补 username / password_hash 列（已存在则忽略报错） ----------
 try { db.exec(`ALTER TABLE users ADD COLUMN username TEXT DEFAULT ''`); } catch (e) { /* 列已存在 */ }

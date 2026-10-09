@@ -27,6 +27,8 @@ export struct DishDetailPage {
   @State previewImages: string[] = [];
   @State previewIndex: number = 0;
   private dishId: string = '';
+  /** 首次加载是否完成：用于区分「首次显示」与「从子页返回」 */
+  private initialized: boolean = false;
 
   private async initPage(dishId: string): Promise<void> {
     this.dishId = dishId;
@@ -34,6 +36,13 @@ export struct DishDetailPage {
     await this.loadReviews(true);
     await Api.getFavorites();
     this.likedIds = await PreferencesUtil.getLikedReviews();
+    this.initialized = true;
+  }
+
+  /** 从写评价页返回后重新拉取：让新提交的评价立即出现，并同步菜品评分/评价数 */
+  private async refreshOnReturn(): Promise<void> {
+    await this.loadDish();
+    await this.loadReviews(true);
   }
 
   async loadDish(): Promise<void> {
@@ -100,8 +109,8 @@ export struct DishDetailPage {
         Column() {
           Scroll() {
             Column() {
-              this.DishHeader(this.dish!)
-              this.NutritionCard(this.dish!)
+              this.DishHeader()
+              this.NutritionCard()
               this.ReviewSection()
             }
           }
@@ -127,37 +136,45 @@ export struct DishDetailPage {
       const p = ctx.pathInfo.param as string;
       this.initPage(p ?? '');
     })
+    .onShown((): void => {
+      // 首次显示由 initPage 负责（此时 initialized 仍为 false），此处只处理从写评价页返回的情况
+      if (this.initialized) {
+        this.refreshOnReturn();
+      }
+    })
   }
 
-  @Builder DishHeader(d: Dish) {
+  // 直接在 Builder 内读 this.dish：@Builder 按值传参时参数变化不会刷新内部 UI，
+  // 否则提交评价返回后标题区的评分/评价数仍是旧值
+  @Builder DishHeader() {
     Column({ space: 8 }) {
-      Image(dishImageSource(d.image))
+      Image(dishImageSource(this.dish!.image))
         .width('100%')
         .height(200)
         .borderRadius(16)
         .objectFit(ImageFit.Cover)
 
-      Text(d.name)
+      Text(this.dish!.name)
         .fontSize($r('app.float.title_large'))
         .fontWeight(FontWeight.Bold)
         .fontColor(ThemeUtil.textPrimary(this.darkMode))
 
       Row({ space: 8 }) {
-        StarRating({ rating: d.rating, starSize: 16 })
-        Text(d.rating.toFixed(1))
+        StarRating({ rating: this.dish!.rating, starSize: 16 })
+        Text(this.dish!.rating.toFixed(1))
           .fontSize($r('app.float.body_text'))
           .fontColor(ThemeUtil.textSecondary(this.darkMode))
-        Text(`${d.reviewCount} 条评价`)
+        Text(`${this.dish!.reviewCount} 条评价`)
           .fontSize($r('app.float.caption_text'))
           .fontColor(ThemeUtil.textHint(this.darkMode))
       }
 
-      Text(`¥${d.price.toFixed(1)}`)
+      Text(`¥${this.dish!.price.toFixed(1)}`)
         .fontSize(22)
         .fontWeight(FontWeight.Bold)
         .fontColor(ThemeUtil.textPrice(this.darkMode))
 
-      Text(`${d.canteenName} · ${d.stallName} · ${d.floor}楼`)
+      Text(`${this.dish!.canteenName} · ${this.dish!.stallName} · ${this.dish!.floor}楼`)
         .fontSize($r('app.float.caption_text'))
         .fontColor(ThemeUtil.textHint(this.darkMode))
     }
@@ -166,13 +183,13 @@ export struct DishDetailPage {
     .backgroundColor(ThemeUtil.cardBg(this.darkMode))
   }
 
-  @Builder NutritionCard(d: Dish) {
+  @Builder NutritionCard() {
     Column({ space: 8 }) {
       Text('营养信息').fontSize($r('app.float.title_small')).fontWeight(FontWeight.Medium)
       Row({ space: 12 }) {
-        this.NutritionItem('热量', `${d.nutrition.calories} kcal`)
-        this.NutritionItem('类型', d.nutrition.isVegetarian ? '素菜' : '荤菜')
-        this.NutritionItem('过敏原', d.nutrition.allergens.length > 0 ? d.nutrition.allergens.join('、') : '无')
+        this.NutritionItem('热量', `${this.dish!.nutrition.calories} kcal`)
+        this.NutritionItem('类型', this.dish!.nutrition.isVegetarian ? '素菜' : '荤菜')
+        this.NutritionItem('过敏原', this.dish!.nutrition.allergens.length > 0 ? this.dish!.nutrition.allergens.join('、') : '无')
       }
     }
     .width('100%')

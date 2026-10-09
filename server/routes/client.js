@@ -16,6 +16,39 @@ function fail(res, status, message) {
   res.status(status).json({ code: 1, message });
 }
 
+/** 读取可配置的评价上限（管理后台可改；读不到时用默认值兜底） */
+function reviewLimits() {
+  const rows = db.prepare(
+    "SELECT key, value FROM settings WHERE key IN ('daily_review_limit', 'monthly_review_limit')"
+  ).all();
+  const map = {};
+  for (const r of rows) map[r.key] = Number(r.value);
+  return {
+    daily: Number.isFinite(map.daily_review_limit) ? map.daily_review_limit : 50,
+    monthly: Number.isFinite(map.monthly_review_limit) ? map.monthly_review_limit : 400
+  };
+}
+
+/** 本地时区的「今天 0 点」和「本月 1 号 0 点」，转成与 create_time 同格式的 ISO 串 */
+function dayStartIso() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+function monthStartIso() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(1);
+  return d.toISOString();
+}
+
+/** 某用户在指定起始时间之后已提交的评价条数 */
+function countReviewsSince(userId, sinceIso) {
+  return db.prepare('SELECT COUNT(*) AS n FROM reviews WHERE user_id = ? AND create_time >= ?')
+    .get(userId, sinceIso).n;
+}
+
 /** 菜品查询公共 SQL（联表取档口/食堂名与楼层） */
 const DISH_SELECT = `
   SELECT d.*, s.name AS stall_name, s.floor AS floor, c.name AS canteen_name
@@ -144,6 +177,15 @@ router.post('/reviews', registeredAuth, (req, res) => {
   const { dishId, rating, dimensions, content, images, isAnonymous } = req.body || {};
   if (!dishId || typeof rating !== 'number' || !content) return fail(res, 400, '参数不完整');
   if (!db.prepare('SELECT id FROM dishes WHERE id = ?').get(dishId)) return fail(res, 404, '菜品不存在');
+
+  // 每个账号的评价频率限制（每日 / 每月上限由管理后台配置）
+  const limits = reviewLimits();
+  if (countReviewsSince(req.user.id, dayStartIso()) >= limits.daily) {
+    return fail(res, 429, `今日评价已达上限（${limits.daily} 条），明天再来吧`);
+  }
+  if (countReviewsSince(req.user.id, monthStartIso()) >= limits.monthly) {
+    return fail(res, 429, `本月评价已达上限（${limits.monthly} 条），下个月再来吧`);
+  }
 
   const id = 'r' + Date.now() + Math.floor(Math.random() * 1000);
   const createTime = new Date().toISOString();

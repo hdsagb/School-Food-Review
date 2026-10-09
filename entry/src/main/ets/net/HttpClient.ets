@@ -94,7 +94,17 @@ export class HttpClient {
         }
         throw new Error(body.message || '业务异常');
       }
-      throw new Error(`HTTP ${response.responseCode}`);
+      // 非 2xx 也优先取响应体里的 message（如超限 429、未登录 401），取不到才退化为状态码
+      let msg: string = `HTTP ${response.responseCode}`;
+      try {
+        const errBody = JSON.parse(response.result as string) as ApiResult<T>;
+        if (errBody && errBody.message) {
+          msg = errBody.message;
+        }
+      } catch (e) {
+        // 响应体不是 JSON 时沿用状态码
+      }
+      throw new Error(msg);
     } catch (err) {
       throw (err as Error);
     } finally {

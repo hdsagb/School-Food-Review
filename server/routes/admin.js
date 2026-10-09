@@ -193,4 +193,39 @@ router.put('/reviews/:id/status', (req, res) => {
   ok(res, { id: req.params.id, status });
 });
 
+// ---------- 评价上限设置 ----------
+
+function readLimitSettings() {
+  const rows = db.prepare(
+    "SELECT key, value FROM settings WHERE key IN ('daily_review_limit', 'monthly_review_limit')"
+  ).all();
+  const map = {};
+  for (const r of rows) map[r.key] = Number(r.value);
+  return {
+    dailyReviewLimit: Number.isFinite(map.daily_review_limit) ? map.daily_review_limit : 50,
+    monthlyReviewLimit: Number.isFinite(map.monthly_review_limit) ? map.monthly_review_limit : 400
+  };
+}
+
+router.get('/settings', (req, res) => {
+  ok(res, readLimitSettings());
+});
+
+// PUT /api/admin/settings { dailyReviewLimit, monthlyReviewLimit } 每个账号的评价频率上限
+router.put('/settings', (req, res) => {
+  const { dailyReviewLimit, monthlyReviewLimit } = req.body || {};
+  const daily = Number(dailyReviewLimit);
+  const monthly = Number(monthlyReviewLimit);
+  if (!Number.isInteger(daily) || daily < 1) return fail(res, 400, '每日上限必须是大于 0 的整数');
+  if (!Number.isInteger(monthly) || monthly < 1) return fail(res, 400, '每月上限必须是大于 0 的整数');
+
+  const upsert = db.prepare(`
+    INSERT INTO settings (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `);
+  upsert.run('daily_review_limit', String(daily));
+  upsert.run('monthly_review_limit', String(monthly));
+  ok(res, readLimitSettings());
+});
+
 module.exports = router;

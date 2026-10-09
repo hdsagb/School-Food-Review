@@ -65,6 +65,7 @@
     <button data-view="stalls">档口</button>
     <button data-view="dishes">菜品</button>
     <button data-view="reviews">评价审核</button>
+    <button data-view="settings">评价上限</button>
   </nav>
   <main>
     <!-- 食堂 -->
@@ -137,6 +138,20 @@
         <tbody id="reviewList"></tbody>
       </table></div>
     </section>
+    <!-- 评价上限 -->
+    <section id="view-settings" class="hidden">
+      <div class="card">
+        <h2>每个账号的评价频率上限</h2>
+        <p class="muted" style="margin-bottom:12px;">达到上限后该账号当天 / 当月无法再提交评价，进入下一天或下个月后自动恢复。</p>
+        <div class="form-row">
+          <label>每日上限</label>
+          <input id="setDaily" type="number" min="1" style="max-width:140px;">
+          <label>每月上限</label>
+          <input id="setMonthly" type="number" min="1" style="max-width:140px;">
+          <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+        </div>
+      </div>
+    </section>
   </main>
 </div>
 
@@ -201,8 +216,8 @@ function switchView(v) {
 }
 document.querySelectorAll('nav button').forEach((b) => b.onclick = () => switchView(b.dataset.view));
 
-async function loadAll() { await Promise.all([loadCanteens(), loadStalls(), loadDishes(), loadReviews()]); }
-function loadView(v) { ({ canteens: loadCanteens, stalls: loadStalls, dishes: loadDishes, reviews: loadReviews })[v](); }
+async function loadAll() { await Promise.all([loadCanteens(), loadStalls(), loadDishes(), loadReviews(), loadSettings()]); }
+function loadView(v) { ({ canteens: loadCanteens, stalls: loadStalls, dishes: loadDishes, reviews: loadReviews, settings: loadSettings })[v](); }
 
 // 食堂
 async function loadCanteens() {
@@ -400,6 +415,20 @@ async function loadReviews() {
 }
 async function setReviewStatus(id, status) {
   try { await api('/admin/reviews/' + id + '/status', 'PUT', { status }); await loadReviews(); toast('已更新'); } catch (e) { toast(e.message); }
+}
+
+// 评价上限设置
+async function loadSettings() {
+  const s = await api('/admin/settings');
+  document.getElementById('setDaily').value = s.dailyReviewLimit;
+  document.getElementById('setMonthly').value = s.monthlyReviewLimit;
+}
+async function saveSettings() {
+  const body = {
+    dailyReviewLimit: parseInt(document.getElementById('setDaily').value, 10),
+    monthlyReviewLimit: parseInt(document.getElementById('setMonthly').value, 10)
+  };
+  try { await api('/admin/settings', 'PUT', body); await loadSettings(); toast('已保存'); } catch (e) { toast(e.message); }
 }
 
 // 启动
