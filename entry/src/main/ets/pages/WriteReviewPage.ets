@@ -28,9 +28,9 @@ export struct WriteReviewPage {
       Scroll() {
         Column({ space: 16 }) {
           this.OverallRating()
-          this.DimensionRating('口味', this.tasteScore, (v: number): void => { this.tasteScore = v; })
-          this.DimensionRating('分量', this.portionScore, (v: number): void => { this.portionScore = v; })
-          this.DimensionRating('性价比', this.valueScore, (v: number): void => { this.valueScore = v; })
+          this.DimensionRating('口味', 'taste')
+          this.DimensionRating('分量', 'portion')
+          this.DimensionRating('性价比', 'value')
           this.ContentInput()
           this.ImagePicker()
           this.AnonymousSwitch()
@@ -77,20 +77,38 @@ export struct WriteReviewPage {
     .borderRadius($r('app.float.corner_card'))
   }
 
-  @Builder DimensionRating(label: string, score: number, onChange: (v: number) => void) {
+  @Builder DimensionRating(label: string, dim: string) {
     Row() {
       Text(label).fontSize($r('app.float.body_text')).layoutWeight(1)
+      // 评分值必须在 Builder 内部直接读 this 的状态字段：
+      // ArkUI 中 @Builder 按值接收参数时，参数变化不会刷新该 Builder 内的 UI
       StarRating({
-        rating: score,
+        rating: this.readDimScore(dim),
         readonly: false,
         starSize: 20,
-        doStarChange: onChange
+        doStarChange: (v: number): void => { this.writeDimScore(dim, v); }
       })
     }
     .width('100%')
     .padding(16)
     .backgroundColor(ThemeUtil.cardBg(this.darkMode))
     .borderRadius($r('app.float.corner_card'))
+  }
+
+  private readDimScore(dim: string): number {
+    if (dim === 'taste') return this.tasteScore;
+    if (dim === 'portion') return this.portionScore;
+    return this.valueScore;
+  }
+
+  private writeDimScore(dim: string, value: number): void {
+    if (dim === 'taste') {
+      this.tasteScore = value;
+    } else if (dim === 'portion') {
+      this.portionScore = value;
+    } else {
+      this.valueScore = value;
+    }
   }
 
   @Builder ContentInput() {

@@ -111,14 +111,18 @@ struct Index {
     try {
       this.canteens = await Api.getCanteenList();
     } catch (e) {
-      this.error = (e as Error).message;
+      // 兜底文案：避免异常 message 为空串时被当作"无错误"，从而误显示成空态
+      this.error = (e as Error).message || '网络请求失败，请检查网络后重试';
     }
   }
 
   async loadMenu(): Promise<void> {
     if (this.canteens.length === 0) {
-      // 食堂列表加载失败时也结束 loading，让错误态（含重试）能显示出来
+      // 没有食堂数据就没有任何菜品可展示：显式置为错误态而非空态，避免把故障伪装成"菜单还没准备好"
       this.loading = false;
+      if (!this.error) {
+        this.error = '食堂列表加载失败，请检查网络后重试';
+      }
       return;
     }
     this.loading = true;
@@ -218,6 +222,13 @@ struct Index {
     this.loadMenu();
   }
 
+  /** 加载失败后的整页重试：重新拉取食堂/档口/菜品，避免只重试菜单却仍无食堂数据 */
+  private retryAll(): void {
+    this.error = '';
+    this.loading = true;
+    this.loadAll();
+  }
+
   private getDateLabel(): string {
     const now = new Date();
     return `${now.getMonth() + 1}月${now.getDate()}日`;
@@ -225,68 +236,80 @@ struct Index {
 
   build() {
     Navigation(this.pathStack) {
-      Column() {
-        this.HeaderBar()
-      this.CanteenChips()
-      this.MealChips()
-      this.StallChips()
-      this.SearchHistory()
-
-      if (this.loading) {
-        SkeletonList({ count: 4 })
-          .layoutWeight(1)
-      } else if (this.error) {
+      Stack() {
         Column() {
-          StateView({ state: 'error', message: this.error, doRetry: (): void => { this.onRefreshTap(); } })
-        }
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
-      } else if (this.dishes.length === 0) {
-        Column() { StateView({ state: 'empty' }) }
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
-      } else {
-        Refresh({ refreshing: $$this.loading }) {
-          List({ space: 10 }) {
-            ForEach(this.dishes, (d: Dish) => {
-              ListItem() {
-                DishCard({
-                  dishData: d,
-                  isFavorite: this.favorites.includes(d.id),
-                  doTap: (): void => { this.goDetail(d.id); },
-                  doFavorite: (): void => { this.toggleFavorite(d.id); }
-                })
-              }
-            }, (d: Dish) => d.id)
-          }
-          .width('100%')
-          .height('100%')
-          .padding({ left: 14, right: 14, top: 10, bottom: 14 })
-        }
-        .onRefreshing((): void => { this.loadMenu(); })
-        .layoutWeight(1)
-      }
+          this.HeaderBar()
+          this.CanteenChips()
+          this.MealChips()
+          this.StallChips()
+          this.SearchHistory()
 
-      this.BottomBar()
-    }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(ThemeUtil.pageBg(this.darkMode))
+          if (this.loading) {
+            SkeletonList({ count: 4 })
+              .layoutWeight(1)
+          } else if (this.error) {
+            Column() {
+              StateView({ state: 'error', message: this.error, doRetry: (): void => { this.retryAll(); } })
+            }
+            .layoutWeight(1)
+            .justifyContent(FlexAlign.Center)
+          } else if (this.dishes.length === 0) {
+            Column() { StateView({ state: 'empty' }) }
+              .layoutWeight(1)
+              .justifyContent(FlexAlign.Center)
+          } else {
+            Refresh({ refreshing: $$this.loading }) {
+              List({ space: 10 }) {
+                ForEach(this.dishes, (d: Dish) => {
+                  ListItem() {
+                    DishCard({
+                      dishData: d,
+                      isFavorite: this.favorites.includes(d.id),
+                      doTap: (): void => { this.goDetail(d.id); },
+                      doFavorite: (): void => { this.toggleFavorite(d.id); }
+                    })
+                  }
+                }, (d: Dish) => d.id)
+              }
+              .width('100%')
+              .height('100%')
+              .padding({ left: 14, right: 14, top: 10, bottom: 14 })
+            }
+            .onRefreshing((): void => { this.loadMenu(); })
+            .layoutWeight(1)
+          }
+
+          this.BottomBar()
+        }
+        .width('100%')
+        .height('100%')
+        .backgroundColor(ThemeUtil.pageBg(this.darkMode))
+
+        // 隐私同意遮罩：用页面内层叠实现，不依赖半模态 API，确保任何设备/模拟器上都能显示
+        if (this.showPrivacySheet) {
+          this.PrivacyOverlay()
+        }
+      }
+      .width('100%')
+      .height('100%')
     }
     .mode(NavigationMode.Stack)
     .hideTitleBar(true)
     .navDestination(this.PagesMap)
-    .bindSheet(this.showPrivacySheet, (): void => { this.PrivacySheet(); }, {
-      height: SheetSize.MEDIUM,
-      showClose: false,
-      dragBar: false,
-      backgroundColor: ThemeUtil.cardBg(this.darkMode),
-      // 拦截下滑/返回等交互式关闭，必须显式点击同意或不同意
-      onWillDismiss: (_action: SheetDismiss): void => {}
-    })
   }
 
-  @Builder PrivacySheet() {
+  @Builder PrivacyOverlay() {
+    Column() {
+      this.PrivacyCard()
+    }
+    .width('100%')
+    .height('100%')
+    .justifyContent(FlexAlign.Center)
+    .backgroundColor('rgba(0,0,0,0.55)')
+    .onClick((): void => {})
+  }
+
+  @Builder PrivacyCard() {
     Column({ space: 14 }) {
       Text('🛡️ 欢迎使用校园食评')
         .fontSize(20)
@@ -323,9 +346,6 @@ struct Index {
         .fontColor(ThemeUtil.brandDeep(this.darkMode))
         .onClick((): void => { this.pathStack.pushPathByName('Privacy', ''); })
 
-      Blank()
-        .layoutWeight(1)
-
       Row({ space: 12 }) {
         Text('不同意并退出')
           .fontSize($r('app.float.body_text'))
@@ -356,10 +376,12 @@ struct Index {
       }
       .width('100%')
     }
-    .width('100%')
-    .height('100%')
+    .width('88%')
     .padding({ left: 20, right: 20, top: 22, bottom: 24 })
     .alignItems(HorizontalAlign.Start)
+    .borderRadius(20)
+    .backgroundColor(ThemeUtil.cardBg(this.darkMode))
+    .shadow({ radius: 24, color: 'rgba(0,0,0,0.25)', offsetX: 0, offsetY: 8 })
   }
 
   @Builder PagesMap(name: string) {

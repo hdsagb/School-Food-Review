@@ -4,10 +4,11 @@
 export class AppConfig {
   /**
    * 后端 API 基础地址
-   * - 模拟器/真机访问宿主机：用电脑局域网 IP（ipconfig 查询，如 http://192.168.1.4:3000/api）
-   * - 注意：10.0.2.2 是 Android 模拟器约定，HarmonyOS 模拟器不保证支持
+   * - 测试环境：阿里云轻量服务器公网 IP + 3000 端口（需在控制台防火墙放行 3000）
+   * - 本地联调：改用电脑局域网 IP（ipconfig 查询，如 http://192.168.1.4:3000/api）
+   * - 注意：末尾必须保留 /api 路径前缀
    */
-  static readonly API_BASE_URL: string = 'http://192.168.1.4:3000/api';
+  static readonly API_BASE_URL: string = 'http://47.117.188.9:3000/api';
 
   /** 是否使用 Mock 数据（接入后端后为 false） */
   static readonly USE_MOCK: boolean = false;

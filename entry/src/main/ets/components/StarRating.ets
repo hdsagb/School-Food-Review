@@ -17,11 +17,10 @@ export struct StarRating {
   }
 
   @Builder StarIcon(idx: number) {
-    Image($r('app.media.startIcon'))
-      .width(this.starSize)
-      .height(this.starSize)
-      .objectFit(ImageFit.Contain)
-      .fillColor(this.getStarColor(idx))
+    // 用文字星符：实心★表示点亮、空心☆表示未点亮；文字可直接着色（Image+fillColor 对位图无效）
+    Text(this.rating - idx >= 0.5 ? '★' : '☆')
+      .fontSize(this.starSize)
+      .fontColor(this.getStarColor(idx))
       .onClick((): void => {
         if (!this.readonly) {
           this.doStarChange(idx + 1);
