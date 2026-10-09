@@ -15,6 +15,7 @@ import { ProfilePage } from './ProfilePage';
 import { MyReviewsPage } from './MyReviewsPage';
 import { FavoritesPage } from './FavoritesPage';
 import { PrivacyPage } from './PrivacyPage';
+import { AboutPage } from './AboutPage';
 import { LoginPage } from './LoginPage';
 
 /** 菜单缓存结构（离线兜底） */
@@ -397,6 +398,8 @@ struct Index {
       FavoritesPage()
     } else if (name === 'Privacy') {
       PrivacyPage()
+    } else if (name === 'About') {
+      AboutPage()
     } else if (name === 'Login') {
       LoginPage()
     }

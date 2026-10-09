@@ -10,6 +10,12 @@ export class AppConfig {
    */
   static readonly API_BASE_URL: string = 'http://47.117.188.9:3000/api';
 
+  /** 应用版本号（需与 AppScope/app.json5 的 versionName 保持一致） */
+  static readonly APP_VERSION: string = '1.0.0';
+
+  /** App 备案号：办理完成后替换为正式号码（如 京ICP备2023XXXXXX号-2A），关于页直接读取此常量 */
+  static readonly APP_FILING_NO: string = '办理中';
+
   /** 是否使用 Mock 数据（接入后端后为 false） */
   static readonly USE_MOCK: boolean = false;
 

@@ -117,7 +117,7 @@ export struct ProfilePage {
       this.MenuItem('🧹 清除缓存', '', (): void => { this.clearCache(); })
       this.DarkModeRow()
       this.MenuItem('📋 隐私声明', '', (): void => { this.goPrivacy(); })
-      this.MenuItem('🌿 关于校园食评', 'v1.0.0', (): void => {})
+      this.MenuItem('🌿 关于校园食评', `v${AppConfig.APP_VERSION}`, (): void => { this.goAbout(); })
     }
     .width('100%')
     .height('100%')
@@ -200,6 +200,10 @@ export struct ProfilePage {
 
   private goPrivacy(): void {
     this.pathStack.pushPathByName('Privacy', '');
+  }
+
+  private goAbout(): void {
+    this.pathStack.pushPathByName('About', '');
   }
 
   private goLogin(): void {
