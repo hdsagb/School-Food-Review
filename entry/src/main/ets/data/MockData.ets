@@ -361,6 +361,12 @@ export class MockData {
     return r.likes;
   }
 
+  /** 举报评价：Mock 模式仅本地吞掉，不产生审核流转 */
+  static async reportReview(reviewId: string): Promise<void> {
+    console.info('mock reportReview: ' + reviewId);
+    await MockData.delay(null);
+  }
+
   private static localUser: User = new User(
     generateUuid(),
     '同学' + Math.floor(Math.random() * 1000),

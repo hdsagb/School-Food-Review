@@ -1,4 +1,5 @@
 import { Api } from '../net/Api';
+import { promptAction } from '@kit.ArkUI';
 import { Dish } from '../model/Dish';
 import { Review, ReviewPage, ReviewSortType } from '../model/Review';
 import { StarRating } from '../components/StarRating';
@@ -8,6 +9,9 @@ import { LoadMoreFooter } from '../components/LoadMoreFooter';
 import { PreferencesUtil } from '../utils/PreferencesUtil';
 import { formatRelativeTime, dishImageSource } from '../utils/CommonUtil';
 import { ThemeUtil } from '../utils/ThemeUtil';
+
+/** 举报理由选项，顺序与弹窗按钮一致 */
+const REPORT_REASONS: string[] = ['垃圾广告', '不实信息', '辱骂攻击', '色情低俗', '其他违规'];
 
 @Component
 export struct DishDetailPage {
@@ -96,6 +100,39 @@ export struct DishDetailPage {
       this.reviews.splice(idx, 1, updated);
     }
     await PreferencesUtil.saveLikedReviews(this.likedIds);
+  }
+
+  /** 举报某条评价：选择理由后提交，服务端会将其转待审核等待人工复核 */
+  private async reportReview(reviewId: string): Promise<void> {
+    if (this.isGuest) {
+      this.promptLogin('举报评价需要登录');
+      return;
+    }
+    const options: promptAction.ActionMenuOptions = {
+      title: '举报该评价',
+      buttons: [
+        { text: REPORT_REASONS[0], color: '#666666' },
+        { text: REPORT_REASONS[1], color: '#666666' },
+        { text: REPORT_REASONS[2], color: '#666666' },
+        { text: REPORT_REASONS[3], color: '#666666' },
+        { text: REPORT_REASONS[4], color: '#666666' }
+      ]
+    };
+    let index: number = -1;
+    try {
+      const res = await this.getUIContext().getPromptAction().showActionMenu(options);
+      index = res.index;
+    } catch (e) {
+      return;
+    }
+    if (index < 0) return;
+
+    try {
+      await Api.reportReview(reviewId, REPORT_REASONS[index], '');
+      this.getUIContext().getPromptAction().showToast({ message: '举报已提交，我们会尽快核实' });
+    } catch (e) {
+      this.getUIContext().getPromptAction().showToast({ message: '举报失败：' + (e as Error).message });
+    }
   }
 
   build() {
@@ -289,6 +326,12 @@ export struct DishDetailPage {
         .borderRadius(12)
         .backgroundColor(this.likedIds.includes(r.id) ? ThemeUtil.tagBg(this.darkMode) : ThemeUtil.pageBg(this.darkMode))
         .onClick((): void => { this.toggleLike(r.id); })
+        Blank()
+        Text('举报')
+          .fontSize($r('app.float.caption_text'))
+          .fontColor(ThemeUtil.textHint(this.darkMode))
+          .padding({ left: 10, right: 4, top: 4, bottom: 4 })
+          .onClick((): void => { this.reportReview(r.id); })
       }
       .width('100%')
       .justifyContent(FlexAlign.Start)

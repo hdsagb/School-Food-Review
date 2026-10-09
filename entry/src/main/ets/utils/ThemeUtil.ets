@@ -92,6 +92,16 @@ export class ThemeUtil {
     return isDark ? '#8FA69B' : $r('app.color.sold_out_text');
   }
 
+  /** 审核未通过徽标底色 */
+  static rejectBg(isDark: boolean): ResourceStr {
+    return isDark ? '#3A2220' : '#FBECEC';
+  }
+
+  /** 审核未通过徽标文字 */
+  static rejectText(isDark: boolean): ResourceStr {
+    return isDark ? '#FF9B8A' : '#C0392B';
+  }
+
   /** 空星颜色 */
   static starInactive(isDark: boolean): ResourceStr {
     return isDark ? '#3A4A41' : $r('app.color.star_inactive');

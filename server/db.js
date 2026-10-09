@@ -108,9 +108,42 @@ db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('monthly_review_
 // 提交评价前按 (user_id, create_time) 统计当日/当月条数，建复合索引避免全表扫描
 db.exec(`CREATE INDEX IF NOT EXISTS idx_reviews_user_time ON reviews(user_id, create_time)`);
 
+// ---------- UGC 审核：举报表与敏感词表（审核模式：先审后发 + 本人可见） ----------
+db.exec(`
+CREATE TABLE IF NOT EXISTS review_reports (
+  id TEXT PRIMARY KEY,
+  review_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  reason TEXT DEFAULT '',
+  detail TEXT DEFAULT '',
+  status TEXT DEFAULT 'pending',
+  create_time TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS banned_words (
+  word TEXT PRIMARY KEY,
+  create_time TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_reports_review ON review_reports(review_id);
+-- 列表查询按 status 过滤并按时间倒序，建复合索引
+CREATE INDEX IF NOT EXISTS idx_reviews_status_time ON reviews(status, create_time);
+`);
+
+// 敏感词默认词库（幂等：仅当词库为空时播种，管理员删过的词不会在重启后复活）
+const BANNED_SEED = ['代写', '刷单', '赌博', '博彩', '办证', '贷款', '色情', '加微信', '加QQ'];
+const hasWords = db.prepare('SELECT COUNT(*) AS n FROM banned_words').get().n > 0;
+if (!hasWords) {
+  const insWord = db.prepare('INSERT OR IGNORE INTO banned_words (word, create_time) VALUES (?, ?)');
+  const wordSeedTime = new Date().toISOString();
+  for (const w of BANNED_SEED) insWord.run(w, wordSeedTime);
+}
+
 // ---------- 旧库迁移：users 表补 username / password_hash 列（已存在则忽略报错） ----------
 try { db.exec(`ALTER TABLE users ADD COLUMN username TEXT DEFAULT ''`); } catch (e) { /* 列已存在 */ }
 try { db.exec(`ALTER TABLE users ADD COLUMN password_hash TEXT DEFAULT ''`); } catch (e) { /* 列已存在 */ }
+// 审核驳回原因（先审后发下，本人需要看到驳回理由）
+try { db.exec(`ALTER TABLE reviews ADD COLUMN reject_reason TEXT DEFAULT ''`); } catch (e) { /* 列已存在 */ }
 // 注册用户名唯一（游客 username 为空串，不参与唯一约束）
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username <> ''`);
 
@@ -204,5 +237,17 @@ if (needSeed()) {
   seed();
   console.log('[db] 种子数据已写入', DB_PATH);
 }
+
+/**
+ * 按「已通过审核」的评价重算菜品的评分与评价数。
+ * 审核状态发生流转（通过 / 驳回）后也必须调用，否则统计会失真。
+ */
+db.recalcDishStats = function recalcDishStats(dishId) {
+  const stat = db.prepare(
+    "SELECT COUNT(id) AS n, AVG(rating) AS avg FROM reviews WHERE dish_id = ? AND status = 'approved'"
+  ).get(dishId);
+  db.prepare('UPDATE dishes SET review_count = ?, rating = ? WHERE id = ?')
+    .run(stat.n, stat.avg ? Math.round(stat.avg * 10) / 10 : 0, dishId);
+};
 
 module.exports = db;

@@ -29,6 +29,8 @@ export class Review {
   likes: number;
   isAnonymous: boolean;
   status: ReviewStatus;
+  /** 审核驳回原因（仅 status 为 REJECTED 时有值） */
+  rejectReason: string;
   createTime: string;
 
   constructor() {
@@ -44,6 +46,7 @@ export class Review {
     this.likes = 0;
     this.isAnonymous = false;
     this.status = ReviewStatus.APPROVED;
+    this.rejectReason = '';
     this.createTime = '';
   }
 }

@@ -49,6 +49,17 @@ function countReviewsSince(userId, sinceIso) {
     .get(userId, sinceIso).n;
 }
 
+/** 命中敏感词则返回第一个命中的词，未命中返回空串 */
+function firstBannedWord(text) {
+  const src = String(text || '');
+  if (!src) return '';
+  const rows = db.prepare('SELECT word FROM banned_words').all();
+  for (const r of rows) {
+    if (r.word && src.includes(r.word)) return r.word;
+  }
+  return '';
+}
+
 /** 菜品查询公共 SQL（联表取档口/食堂名与楼层） */
 const DISH_SELECT = `
   SELECT d.*, s.name AS stall_name, s.floor AS floor, c.name AS canteen_name
@@ -103,6 +114,7 @@ function reviewRowToModel(r) {
     likes: r.likes,
     isAnonymous: anon,
     status: r.status,
+    rejectReason: r.reject_reason || '',
     createTime: r.create_time
   };
 }
@@ -187,23 +199,26 @@ router.post('/reviews', registeredAuth, (req, res) => {
     return fail(res, 429, `本月评价已达上限（${limits.monthly} 条），下个月再来吧`);
   }
 
+  // 先审后发：命中敏感词直接驳回并给出原因，其余进入待审核；审核通过后才对外可见
+  const hitWord = firstBannedWord(content);
+  const status = hitWord ? 'rejected' : 'pending';
+  const rejectReason = hitWord ? `包含敏感词「${hitWord}」` : '';
+
   const id = 'r' + Date.now() + Math.floor(Math.random() * 1000);
   const createTime = new Date().toISOString();
   const dim = dimensions || {};
   db.prepare(`
     INSERT INTO reviews (id, dish_id, user_id, rating, taste, portion, value, content, images,
-                         likes, is_anonymous, status, create_time)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'approved', ?)
+                         likes, is_anonymous, status, reject_reason, create_time)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
   `).run(
     id, dishId, req.user.id, rating,
     dim.taste || rating, dim.portion || rating, dim.value || rating,
-    content, JSON.stringify(images || []), isAnonymous ? 1 : 0, createTime
+    content, JSON.stringify(images || []), isAnonymous ? 1 : 0, status, rejectReason, createTime
   );
 
-  const stat = db.prepare("SELECT COUNT(*) AS n, AVG(rating) AS avg FROM reviews WHERE dish_id = ? AND status = 'approved'")
-    .get(dishId);
-  db.prepare('UPDATE dishes SET review_count = ?, rating = ? WHERE id = ?')
-    .run(stat.n, Math.round(stat.avg * 10) / 10, dishId);
+  // 待审/驳回的评价不计入菜品统计，重算后数值保持不变
+  db.recalcDishStats(dishId);
 
   ok(res, reviewRowToModel(db.prepare(`${REVIEW_SELECT} WHERE r.id = ?`).get(id)));
 });
@@ -223,6 +238,33 @@ router.post('/reviews/:reviewId/like', registeredAuth, (req, res) => {
     db.prepare('UPDATE reviews SET likes = likes + 1 WHERE id = ?').run(reviewId);
     ok(res, r.likes + 1);
   }
+});
+
+// POST /api/reviews/:reviewId/report { reason, detail } 举报评价（仅注册用户）
+router.post('/reviews/:reviewId/report', registeredAuth, (req, res) => {
+  const { reason, detail } = req.body || {};
+  const reviewId = req.params.reviewId;
+  const r = db.prepare('SELECT id, dish_id, status FROM reviews WHERE id = ?').get(reviewId);
+  if (!r) return fail(res, 404, '评价不存在');
+
+  // 同一用户对同一条评价的重复举报不再累加
+  const dup = db.prepare(
+    "SELECT id FROM review_reports WHERE review_id = ? AND user_id = ? AND status = 'pending'"
+  ).get(reviewId, req.user.id);
+  if (dup) return ok(res, { reported: true });
+
+  const id = 'p' + Date.now() + Math.floor(Math.random() * 1000);
+  db.prepare(`
+    INSERT INTO review_reports (id, review_id, user_id, reason, detail, status, create_time)
+    VALUES (?, ?, ?, ?, ?, 'pending', ?)
+  `).run(id, reviewId, req.user.id, String(reason || ''), String(detail || ''), new Date().toISOString());
+
+  // 已通过的评价被举报后立即下架，转待审等人工复核
+  if (r.status === 'approved') {
+    db.prepare("UPDATE reviews SET status = 'pending', reject_reason = '' WHERE id = ?").run(reviewId);
+    db.recalcDishStats(r.dish_id);
+  }
+  ok(res, { reported: true });
 });
 
 // ---------- 用户相关 ----------

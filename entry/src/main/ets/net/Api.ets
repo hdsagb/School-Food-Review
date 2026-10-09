@@ -67,6 +67,16 @@ export class Api {
     return Api.client.post<number>(`/reviews/${reviewId}/like`);
   }
 
+  /** 举报评价（仅注册用户）：服务端会将其转待审核，由后台人工复核 */
+  static async reportReview(reviewId: string, reason: string, detail: string): Promise<void> {
+    if (AppConfig.USE_MOCK) {
+      await MockData.reportReview(reviewId);
+      return;
+    }
+    const body: Record<string, string> = { 'reason': reason, 'detail': detail };
+    await Api.client.post<Object>(`/reviews/${reviewId}/report`, body);
+  }
+
   static async getMyReviews(): Promise<MyReviewItem[]> {
     if (AppConfig.USE_MOCK) return MockData.getMyReviews();
     const list = await Api.client.get<MyReviewItem[]>('/user/reviews');

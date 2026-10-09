@@ -179,18 +179,28 @@ router.get('/reviews', (req, res) => {
   ok(res, rows.map((r) => ({
     id: r.id, dishId: r.dish_id, dishName: r.dish_name, rating: r.rating,
     content: r.content, images: JSON.parse(r.images || '[]'), likes: r.likes,
-    isAnonymous: !!r.is_anonymous, status: r.status, createTime: r.create_time
+    isAnonymous: !!r.is_anonymous, status: r.status,
+    rejectReason: r.reject_reason || '', createTime: r.create_time
   })));
 });
 
-// PUT /api/admin/reviews/:id/status { status: 'approved' | 'rejected' }
+// PUT /api/admin/reviews/:id/status { status: 'approved' | 'rejected' | 'pending', rejectReason? }
 router.put('/reviews/:id/status', (req, res) => {
-  const { status } = req.body || {};
-  if (status !== 'approved' && status !== 'rejected') return fail(res, 400, '状态非法');
-  const r = db.prepare('SELECT id FROM reviews WHERE id = ?').get(req.params.id);
+  const { status, rejectReason } = req.body || {};
+  if (status !== 'approved' && status !== 'rejected' && status !== 'pending') {
+    return fail(res, 400, '状态非法');
+  }
+  const r = db.prepare('SELECT id, dish_id FROM reviews WHERE id = ?').get(req.params.id);
   if (!r) return fail(res, 404, '评价不存在');
-  db.prepare('UPDATE reviews SET status = ? WHERE id = ?').run(status, req.params.id);
-  ok(res, { id: req.params.id, status });
+
+  // 驳回时记录原因，供 App 端「我的评价」展示
+  const reason = status === 'rejected' ? String(rejectReason || '未通过审核') : '';
+  db.prepare('UPDATE reviews SET status = ?, reject_reason = ? WHERE id = ?')
+    .run(status, reason, req.params.id);
+
+  // 状态流转会改变「已通过」集合，必须重算菜品评分与评价数，否则统计失真
+  db.recalcDishStats(r.dish_id);
+  ok(res, { id: req.params.id, status, rejectReason: reason });
 });
 
 // ---------- 评价上限设置 ----------
@@ -226,6 +236,81 @@ router.put('/settings', (req, res) => {
   upsert.run('daily_review_limit', String(daily));
   upsert.run('monthly_review_limit', String(monthly));
   ok(res, readLimitSettings());
+});
+
+// ---------- 举报处理 ----------
+
+// GET /api/admin/reports?status=pending
+router.get('/reports', (req, res) => {
+  const { status } = req.query;
+  const where = status ? 'WHERE p.status = ?' : '';
+  const rows = db.prepare(`
+    SELECT p.*, r.content AS review_content, r.status AS review_status, d.name AS dish_name
+    FROM review_reports p
+    LEFT JOIN reviews r ON p.review_id = r.id
+    LEFT JOIN dishes d ON r.dish_id = d.id
+    ${where}
+    ORDER BY p.create_time DESC LIMIT 200
+  `).all(...(status ? [status] : []));
+  ok(res, rows.map((p) => ({
+    id: p.id,
+    reviewId: p.review_id,
+    reviewContent: p.review_content || '（评价已删除）',
+    reviewStatus: p.review_status || '',
+    dishName: p.dish_name || '',
+    reason: p.reason,
+    detail: p.detail,
+    status: p.status,
+    createTime: p.create_time
+  })));
+});
+
+// PUT /api/admin/reports/:id { status: 'handled' | 'ignored', reviewStatus?: 'approved' | 'rejected' }
+// 处理举报时可选一并裁决被举报的评价
+router.put('/reports/:id', (req, res) => {
+  const { status, reviewStatus } = req.body || {};
+  if (status !== 'handled' && status !== 'ignored') return fail(res, 400, '状态非法');
+  const p = db.prepare('SELECT id, review_id FROM review_reports WHERE id = ?').get(req.params.id);
+  if (!p) return fail(res, 404, '举报不存在');
+
+  db.prepare('UPDATE review_reports SET status = ? WHERE id = ?').run(status, req.params.id);
+
+  if (reviewStatus === 'approved' || reviewStatus === 'rejected') {
+    const r = db.prepare('SELECT dish_id FROM reviews WHERE id = ?').get(p.review_id);
+    if (r) {
+      const reason = reviewStatus === 'rejected' ? '举报核实，内容违规' : '';
+      db.prepare('UPDATE reviews SET status = ?, reject_reason = ? WHERE id = ?')
+        .run(reviewStatus, reason, p.review_id);
+      db.recalcDishStats(r.dish_id);
+    }
+  }
+  ok(res, { id: req.params.id, status });
+});
+
+// ---------- 敏感词库 ----------
+
+router.get('/banned-words', (req, res) => {
+  ok(res, db.prepare('SELECT word FROM banned_words ORDER BY word').all().map((x) => x.word));
+});
+
+// PUT /api/admin/banned-words { words: string[] } 覆盖式保存词库
+router.put('/banned-words', (req, res) => {
+  const { words } = req.body || {};
+  if (!Array.isArray(words)) return fail(res, 400, 'words 必须是数组');
+  const list = Array.from(new Set(words.map((w) => String(w).trim()).filter((w) => w.length > 0)));
+
+  db.exec('BEGIN');
+  try {
+    db.prepare('DELETE FROM banned_words').run();
+    const ins = db.prepare('INSERT OR IGNORE INTO banned_words (word, create_time) VALUES (?, ?)');
+    const t = new Date().toISOString();
+    for (const w of list) ins.run(w, t);
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    return fail(res, 500, '保存失败');
+  }
+  ok(res, list);
 });
 
 module.exports = router;

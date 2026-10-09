@@ -64,6 +64,8 @@
     <button data-view="stalls">档口</button>
     <button data-view="dishes">菜品</button>
     <button data-view="reviews">评价审核</button>
+    <button data-view="reports">举报处理</button>
+    <button data-view="words">敏感词库</button>
     <button data-view="settings">评价上限</button>
   </nav>
   <main>
@@ -132,10 +134,53 @@
     </section>
     <!-- 评价审核 -->
     <section id="view-reviews" class="hidden">
-      <div class="card"><h2>评价审核</h2><table>
-        <thead><tr><th>菜品</th><th>评分</th><th>内容</th><th>点赞</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
-        <tbody id="reviewList"></tbody>
-      </table></div>
+      <div class="card">
+        <div class="form-row" style="margin-bottom:12px;">
+          <label>状态</label>
+          <select id="reviewStatusFilter" onchange="loadReviews()" style="max-width:180px;">
+            <option value="pending">待审核</option>
+            <option value="">全部</option>
+            <option value="approved">已通过</option>
+            <option value="rejected">已拒绝</option>
+          </select>
+          <span class="muted">新提交的评价默认待审核，审核通过后才会对外公开；被驳回的评价仅作者本人可见。</span>
+        </div>
+        <table>
+          <thead><tr><th>菜品</th><th>评分</th><th>内容</th><th>点赞</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
+          <tbody id="reviewList"></tbody>
+        </table>
+      </div>
+    </section>
+    <!-- 举报处理 -->
+    <section id="view-reports" class="hidden">
+      <div class="card">
+        <div class="form-row" style="margin-bottom:12px;">
+          <label>状态</label>
+          <select id="reportStatusFilter" onchange="loadReports()" style="max-width:180px;">
+            <option value="pending">待处理</option>
+            <option value="">全部</option>
+            <option value="handled">已处理</option>
+            <option value="ignored">已忽略</option>
+          </select>
+          <span class="muted">举报后该评价会立即下架转待审核，请在处理举报时一并裁决评价是否恢复。</span>
+        </div>
+        <table>
+          <thead><tr><th>菜品</th><th>评价内容</th><th>举报原因</th><th>评价状态</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
+          <tbody id="reportList"></tbody>
+        </table>
+      </div>
+    </section>
+    <!-- 敏感词库 -->
+    <section id="view-words" class="hidden">
+      <div class="card">
+        <h2>敏感词库</h2>
+        <p class="muted" style="margin-bottom:12px;">每行一个词。用户提交评价时命中任一敏感词将被自动驳回，并提示命中原因。保存为全量覆盖。</p>
+        <textarea id="wordList" rows="10" style="width:100%; border:1px solid #d5ddd9; border-radius:6px; padding:10px; font-size:13px; font-family:monospace;"></textarea>
+        <div class="form-row" style="margin-top:12px;">
+          <button class="btn btn-primary" onclick="saveWords()">保存词库</button>
+          <span id="wordCount" class="muted"></span>
+        </div>
+      </div>
     </section>
     <!-- 评价上限 -->
     <section id="view-settings" class="hidden">
@@ -216,7 +261,7 @@ function switchView(v) {
 document.querySelectorAll('nav button').forEach((b) => b.onclick = () => switchView(b.dataset.view));
 
 async function loadAll() { await Promise.all([loadCanteens(), loadStalls(), loadDishes(), loadReviews(), loadSettings()]); }
-function loadView(v) { ({ canteens: loadCanteens, stalls: loadStalls, dishes: loadDishes, reviews: loadReviews, settings: loadSettings })[v](); }
+function loadView(v) { ({ canteens: loadCanteens, stalls: loadStalls, dishes: loadDishes, reviews: loadReviews, reports: loadReports, words: loadWords, settings: loadSettings })[v](); }
 
 // 食堂
 async function loadCanteens() {
@@ -398,22 +443,85 @@ async function uploadDishImage() {
 }
 
 // 评价审核
+function statusBadge(s) {
+  if (s === 'approved') return '<span class="tag">已通过</span>';
+  if (s === 'rejected') return '<span class="soldout">已拒绝</span>';
+  if (s === 'pending') return '<span class="tag" style="background:#fff4e0; color:#b26a00;">待审核</span>';
+  return '<span class="muted">—</span>';
+}
 async function loadReviews() {
-  const list = await api('/admin/reviews');
-  document.getElementById('reviewList').innerHTML = list.map((r) => `
+  const status = document.getElementById('reviewStatusFilter').value;
+  const list = await api('/admin/reviews' + (status ? '?status=' + status : ''));
+  const rows = list.map((r) => `
     <tr>
       <td>${esc(r.dishName)}</td><td>${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</td>
-      <td>${esc(r.content)}</td><td>👍 ${r.likes}</td>
-      <td>${r.status === 'approved' ? '<span class="tag">已通过</span>' : '<span class="soldout">已拒绝</span>'}</td>
+      <td>${esc(r.content)}${r.status === 'rejected' && r.rejectReason ? `<div class="muted">驳回原因：${esc(r.rejectReason)}</div>` : ''}</td>
+      <td>👍 ${r.likes}</td>
+      <td>${statusBadge(r.status)}</td>
       <td class="muted">${new Date(r.createTime).toLocaleString()}</td>
       <td>
-        <button class="btn btn-ghost btn-sm" onclick="setReviewStatus('${r.id}','approved')">通过</button>
-        <button class="btn btn-danger btn-sm" onclick="setReviewStatus('${r.id}','rejected')">拒绝</button>
+        ${r.status !== 'approved' ? `<button class="btn btn-ghost btn-sm" onclick="setReviewStatus('${r.id}','approved')">通过</button>` : ''}
+        ${r.status !== 'rejected' ? `<input id="rsn-${r.id}" placeholder="驳回原因" style="border:1px solid #d5ddd9; border-radius:6px; padding:4px 8px; font-size:12px; width:110px; margin:0 4px;">
+          <button class="btn btn-danger btn-sm" onclick="rejectReview('${r.id}')">拒绝</button>` : ''}
       </td>
     </tr>`).join('');
+  document.getElementById('reviewList').innerHTML = rows || '<tr><td colspan="7" class="muted">暂无数据</td></tr>';
 }
 async function setReviewStatus(id, status) {
   try { await api('/admin/reviews/' + id + '/status', 'PUT', { status }); await loadReviews(); toast('已更新'); } catch (e) { toast(e.message); }
+}
+async function rejectReview(id) {
+  const el = document.getElementById('rsn-' + id);
+  const rejectReason = (el && el.value.trim()) || '未通过审核';
+  try {
+    await api('/admin/reviews/' + id + '/status', 'PUT', { status: 'rejected', rejectReason });
+    await loadReviews(); toast('已拒绝');
+  } catch (e) { toast(e.message); }
+}
+
+// 举报处理
+async function loadReports() {
+  const status = document.getElementById('reportStatusFilter').value;
+  const list = await api('/admin/reports' + (status ? '?status=' + status : ''));
+  const rows = list.map((p) => `
+    <tr>
+      <td>${esc(p.dishName)}</td>
+      <td>${esc(p.reviewContent)}</td>
+      <td>${esc(p.reason)}${p.detail ? `<div class="muted">${esc(p.detail)}</div>` : ''}</td>
+      <td class="muted">${reviewStatusText(p.reviewStatus)}</td>
+      <td>${p.status === 'handled' ? '<span class="tag">已处理</span>' : p.status === 'ignored' ? '<span class="muted">已忽略</span>' : '<span class="tag" style="background:#fff4e0; color:#b26a00;">待处理</span>'}</td>
+      <td class="muted">${new Date(p.createTime).toLocaleString()}</td>
+      <td>
+        ${p.status === 'pending' ? `
+          <button class="btn btn-danger btn-sm" onclick="handleReport('${p.id}','handled','rejected')">删除评价</button>
+          <button class="btn btn-ghost btn-sm" onclick="handleReport('${p.id}','ignored','approved')">恢复评价</button>
+          <button class="btn btn-ghost btn-sm" onclick="handleReport('${p.id}','handled','')">仅标记处理</button>` : '<span class="muted">—</span>'}
+      </td>
+    </tr>`).join('');
+  document.getElementById('reportList').innerHTML = rows || '<tr><td colspan="7" class="muted">暂无数据</td></tr>';
+}
+function reviewStatusText(s) {
+  return s === 'approved' ? '已通过' : s === 'rejected' ? '已拒绝' : s === 'pending' ? '待审核' : '—';
+}
+async function handleReport(id, status, reviewStatus) {
+  const body = { status };
+  if (reviewStatus) body.reviewStatus = reviewStatus;
+  try { await api('/admin/reports/' + id, 'PUT', body); await loadReports(); toast('已处理'); } catch (e) { toast(e.message); }
+}
+
+// 敏感词库
+async function loadWords() {
+  const words = await api('/admin/banned-words');
+  document.getElementById('wordList').value = words.join('\n');
+  document.getElementById('wordCount').textContent = `当前 ${words.length} 个词`;
+}
+async function saveWords() {
+  const words = document.getElementById('wordList').value.split(/\r?\n/).map((w) => w.trim()).filter(Boolean);
+  try {
+    const saved = await api('/admin/banned-words', 'PUT', { words });
+    document.getElementById('wordCount').textContent = `当前 ${saved.length} 个词`;
+    toast('已保存');
+  } catch (e) { toast(e.message); }
 }
 
 // 评价上限设置

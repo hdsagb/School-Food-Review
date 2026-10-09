@@ -1,6 +1,6 @@
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { Api } from '../net/Api';
-import { ReviewDimensions, WriteReviewParam } from '../model/Review';
+import { Review, ReviewDimensions, ReviewStatus, WriteReviewParam } from '../model/Review';
 import { AppConfig } from '../config/AppConfig';
 import { StarRating } from '../components/StarRating';
 import { TopBar } from '../components/TopBar';
@@ -260,8 +260,13 @@ export struct WriteReviewPage {
         images: urls,
         isAnonymous: this.isAnonymous
       };
-      await Api.submitReview(req);
-      this.getUIContext().getPromptAction().showToast({ message: '评价已发布' });
+      // 先审后发：命中敏感词会被直接驳回，其余进入待审核，两种情况都提示清楚
+      const saved: Review = await Api.submitReview(req);
+      this.getUIContext().getPromptAction().showToast({
+        message: saved.status === ReviewStatus.REJECTED
+          ? '内容含违规信息，已驳回，可在「我的评价」查看原因'
+          : '评价已提交，审核通过后展示'
+      });
       this.pathStack.pop();
     } catch (e) {
       this.getUIContext().getPromptAction().showToast({ message: '提交失败：' + (e as Error).message });

@@ -1,5 +1,5 @@
 import { Api } from '../net/Api';
-import { MyReviewItem } from '../model/Review';
+import { MyReviewItem, ReviewStatus } from '../model/Review';
 import { StarRating } from '../components/StarRating';
 import { StateView } from '../components/StateView';
 import { TopBar } from '../components/TopBar';
@@ -88,6 +88,31 @@ export struct MyReviewsPage {
           .fontWeight(FontWeight.Medium)
           .fontColor(ThemeUtil.brandDeep(this.darkMode))
           .layoutWeight(1)
+        if (item.review.status === ReviewStatus.PENDING) {
+          Text('审核中')
+            .fontSize($r('app.float.caption_text'))
+            .fontColor(ThemeUtil.tagWarmText(this.darkMode))
+            .backgroundColor(ThemeUtil.tagWarmBg(this.darkMode))
+            .padding({ left: 6, right: 6, top: 1, bottom: 1 })
+            .borderRadius(8)
+            .margin({ right: 6 })
+        } else if (item.review.status === ReviewStatus.REJECTED) {
+          Text('未通过')
+            .fontSize($r('app.float.caption_text'))
+            .fontColor(ThemeUtil.rejectText(this.darkMode))
+            .backgroundColor(ThemeUtil.rejectBg(this.darkMode))
+            .padding({ left: 6, right: 6, top: 1, bottom: 1 })
+            .borderRadius(8)
+            .margin({ right: 6 })
+        } else {
+          Text('已通过')
+            .fontSize($r('app.float.caption_text'))
+            .fontColor(ThemeUtil.tagText(this.darkMode))
+            .backgroundColor(ThemeUtil.tagBg(this.darkMode))
+            .padding({ left: 6, right: 6, top: 1, bottom: 1 })
+            .borderRadius(8)
+            .margin({ right: 6 })
+        }
         Text(formatRelativeTime(item.review.createTime))
           .fontSize($r('app.float.caption_text'))
           .fontColor(ThemeUtil.textHint(this.darkMode))
@@ -100,6 +125,13 @@ export struct MyReviewsPage {
         .fontSize($r('app.float.body_text'))
         .fontColor(ThemeUtil.textSecondary(this.darkMode))
         .width('100%')
+
+      if (item.review.status === ReviewStatus.REJECTED && item.review.rejectReason.length > 0) {
+        Text(`未通过原因：${item.review.rejectReason}`)
+          .fontSize($r('app.float.caption_text'))
+          .fontColor(ThemeUtil.rejectText(this.darkMode))
+          .width('100%')
+      }
 
       if (item.review.images.length > 0) {
         Row({ space: 6 }) {
