@@ -34,7 +34,7 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`[server] 校园食评演示后端已启动: http://localhost:${PORT}`);
-  console.log(`[server] 管理端: http://localhost:${PORT}/   （默认账号 admin / admin123）`);
+  console.log(`[server] 管理端: http://localhost:${PORT}/`);
 });
 
 module.exports = app;

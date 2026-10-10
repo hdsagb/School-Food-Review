@@ -1,0 +1,11 @@
+[Unit]
+Description=每日备份校园食评数据库
+
+[Timer]
+# 每天凌晨 3:30 执行；服务器若停机过，开机后补跑一次
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

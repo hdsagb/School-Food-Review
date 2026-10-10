@@ -16,3 +16,4 @@
 /server/uploads
 /server/data.db
 /server/data.db-*
+/server/backups

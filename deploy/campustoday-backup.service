@@ -1,0 +1,11 @@
+[Unit]
+Description=校园食评 SQLite 数据库备份
+Documentation=https://github.com/hdsagb/School-Food-Review
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/campustoday/server
+ExecStart=/usr/bin/node /opt/campustoday/server/backup.js
+# 备份放在应用目录之外，避免重新部署 server/ 时被覆盖
+Environment=BACKUP_DIR=/opt/campustoday/backups/db
+Environment=BACKUP_KEEP=14
