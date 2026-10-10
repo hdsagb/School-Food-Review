@@ -5,6 +5,7 @@
 const express = require('express');
 const db = require('../db');
 const { parseBearer, genToken, guestAuth, registeredAuth, hashPassword, verifyPassword } = require('../auth');
+const { rateLimit } = require('../rateLimit');
 
 const router = express.Router();
 
@@ -101,12 +102,14 @@ function dishRowToModel(d) {
 
 function reviewRowToModel(r) {
   const anon = !!r.is_anonymous;
+  // user_id 为 'deleted' 表示作者已注销账号，评价按匿名化保留
+  const gone = r.user_id === 'deleted';
   return {
     id: r.id,
     dishId: r.dish_id,
     userId: r.user_id,
-    userNickname: anon ? '匿名同学' : (r.user_nickname || '同学'),
-    userAvatar: anon ? '' : (r.user_avatar || ''),
+    userNickname: gone ? '已注销用户' : (anon ? '匿名同学' : (r.user_nickname || '同学')),
+    userAvatar: (anon || gone) ? '' : (r.user_avatar || ''),
     rating: r.rating,
     dimensions: { taste: r.taste, portion: r.portion, value: r.value },
     content: r.content,
@@ -185,7 +188,7 @@ router.get('/dishes/:dishId/reviews', (req, res) => {
 });
 
 // POST /api/reviews 提交评价（仅注册用户）
-router.post('/reviews', registeredAuth, (req, res) => {
+router.post('/reviews', registeredAuth, rateLimit({ windowMs: 10 * 60 * 1000, max: 10, scope: 'review', keyOf: (req) => req.user.id }), (req, res) => {
   const { dishId, rating, dimensions, content, images, isAnonymous } = req.body || {};
   if (!dishId || typeof rating !== 'number' || !content) return fail(res, 400, '参数不完整');
   if (!db.prepare('SELECT id FROM dishes WHERE id = ?').get(dishId)) return fail(res, 404, '菜品不存在');
@@ -241,7 +244,7 @@ router.post('/reviews/:reviewId/like', registeredAuth, (req, res) => {
 });
 
 // POST /api/reviews/:reviewId/report { reason, detail } 举报评价（仅注册用户）
-router.post('/reviews/:reviewId/report', registeredAuth, (req, res) => {
+router.post('/reviews/:reviewId/report', registeredAuth, rateLimit({ windowMs: 60 * 60 * 1000, max: 20, scope: 'report', keyOf: (req) => req.user.id }), (req, res) => {
   const { reason, detail } = req.body || {};
   const reviewId = req.params.reviewId;
   const r = db.prepare('SELECT id, dish_id, status FROM reviews WHERE id = ?').get(reviewId);
@@ -326,6 +329,36 @@ router.post('/user/favorites', registeredAuth, (req, res) => {
   ok(res, favoritesOf(req.user.id));
 });
 
+// POST /api/user/delete { password } 注销账号（仅注册用户）
+router.post('/user/delete', registeredAuth, (req, res) => {
+  const { password } = req.body || {};
+  if (!password) return fail(res, 400, '请输入登录密码以确认注销');
+  if (!verifyPassword(String(password), req.user.password_hash)) {
+    return fail(res, 403, '密码不正确');
+  }
+
+  const uid = req.user.id;
+  try {
+    db.exec('BEGIN');
+    // 评价匿名化保留：作者改挂到 'deleted' 标识，社区内容与菜品评分不受影响
+    db.prepare("UPDATE reviews SET user_id = 'deleted' WHERE user_id = ?").run(uid);
+    // 点赞记录删除前先回减对应评价的点赞数，避免计数漂移
+    const likedRows = db.prepare('SELECT review_id FROM review_likes WHERE user_id = ?').all(uid);
+    for (const row of likedRows) {
+      db.prepare('UPDATE reviews SET likes = MAX(0, likes - 1) WHERE id = ?').run(row.review_id);
+    }
+    db.prepare('DELETE FROM user_favorites WHERE user_id = ?').run(uid);
+    db.prepare('DELETE FROM review_likes WHERE user_id = ?').run(uid);
+    db.prepare('DELETE FROM review_reports WHERE user_id = ?').run(uid);
+    db.prepare('DELETE FROM users WHERE id = ?').run(uid);
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    return fail(res, 500, '注销失败，请稍后重试');
+  }
+  ok(res, { deleted: true });
+});
+
 // ---------- 注册 / 登录 ----------
 
 function userPayload(user) {
@@ -339,7 +372,7 @@ function userPayload(user) {
 }
 
 // POST /api/auth/register { username, password, nickname? }
-router.post('/auth/register', (req, res) => {
+router.post('/auth/register', rateLimit({ windowMs: 60 * 60 * 1000, max: 30, scope: 'register', message: '注册过于频繁，请稍后再试' }), (req, res) => {
   const { username, password, nickname } = req.body || {};
   const uname = String(username || '').trim();
   const pwd = String(password || '');
@@ -365,7 +398,14 @@ router.post('/auth/register', (req, res) => {
 });
 
 // POST /api/auth/login { username, password }
-router.post('/auth/login', (req, res) => {
+// 双维度限流：先按账号防暴力破解（不受校园网 NAT 影响），再按 IP 兜底防批量尝试
+router.post('/auth/login',
+  rateLimit({
+    windowMs: 15 * 60 * 1000, max: 10, scope: 'login-user',
+    keyOf: (req) => String((req.body || {}).username || '').trim().toLowerCase()
+  }),
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 100, scope: 'login-ip' }),
+  (req, res) => {
   const { username, password } = req.body || {};
   const uname = String(username || '').trim();
   const pwd = String(password || '');

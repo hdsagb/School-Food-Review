@@ -116,6 +116,22 @@ export class Api {
     return await Api.getLocalUser();
   }
 
+  /** 注销账号：评价匿名化保留、账号与关联数据删除；成功后回到游客模式 */
+  static async deleteAccount(password: string): Promise<User> {
+    const body: Record<string, string> = { 'password': password };
+    await Api.client.post<Object>('/user/delete', body);
+    Api.client.setToken('');
+    await PreferencesUtil.remove(AppConfig.PREF_KEY_TOKEN);
+    await PreferencesUtil.remove(AppConfig.PREF_KEY_USER);
+    const user = await Api.getLocalUser();
+    // 收藏/我的评价随账号一并清除，响应式刷新本地状态
+    AppStorage.setOrCreate<string[]>('favorites', []);
+    AppStorage.setOrCreate<MyReviewItem[]>('myReviews', []);
+    AppStorage.setOrCreate<number>('myReviewCount', 0);
+    await PreferencesUtil.saveFavorites([]);
+    return user;
+  }
+
   /** 同步用户态到 AppStorage（isGuest / localUser），供各页面响应式判断游客权限 */
   private static syncUserState(user: User): void {
     AppStorage.setOrCreate<boolean>('isGuest', user.username === '');

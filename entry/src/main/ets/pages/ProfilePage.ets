@@ -111,6 +111,7 @@ export struct ProfilePage {
         this.MenuItem('🔐 登录 / 注册', '', (): void => { this.goLogin(); })
       } else {
         this.MenuItem('🚪 退出登录', '', (): void => { this.confirmLogout(); })
+        this.MenuItem('⚠️ 注销账号', '', (): void => { this.goDeleteAccount(); })
       }
       this.MenuItem('📝 我的评价', `${this.myReviewCount} 条`, (): void => { this.goMyReviews(); })
       this.MenuItem('⭐ 我的收藏', `${this.favorites.length} 道`, (): void => { this.goFavorites(); })
@@ -208,6 +209,10 @@ export struct ProfilePage {
 
   private goLogin(): void {
     this.pathStack.pushPathByName('Login', '');
+  }
+
+  private goDeleteAccount(): void {
+    this.pathStack.pushPathByName('DeleteAccount', '');
   }
 
   private confirmLogout(): void {

@@ -17,6 +17,7 @@ import { FavoritesPage } from './FavoritesPage';
 import { PrivacyPage } from './PrivacyPage';
 import { AboutPage } from './AboutPage';
 import { LoginPage } from './LoginPage';
+import { DeleteAccountPage } from './DeleteAccountPage';
 
 /** 菜单缓存结构（离线兜底） */
 interface MenuCache {
@@ -402,6 +403,8 @@ struct Index {
       AboutPage()
     } else if (name === 'Login') {
       LoginPage()
+    } else if (name === 'DeleteAccount') {
+      DeleteAccountPage()
     }
   }
 
