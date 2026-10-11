@@ -34,25 +34,124 @@ router.post('/login', (req, res) => {
 // 以下接口需管理员登录
 router.use(adminAuth);
 
+// ---------- 学校 ----------
+
+// GET /api/admin/schools 学校列表（附食堂 / 菜品 / 用户数，供判断能否直接删除）
+router.get('/schools', (req, res) => {
+  const rows = db.prepare(`
+    SELECT s.*,
+      (SELECT COUNT(*) FROM canteens c WHERE c.school_id = s.id) AS canteen_count,
+      (SELECT COUNT(*) FROM dishes d JOIN canteens c ON d.canteen_id = c.id WHERE c.school_id = s.id) AS dish_count,
+      (SELECT COUNT(*) FROM users u WHERE u.school_id = s.id) AS user_count
+    FROM schools s
+    ORDER BY s.create_time, s.id
+  `).all();
+  ok(res, rows.map((s) => ({
+    id: s.id, name: s.name, level: s.level, city: s.city,
+    pinyinFull: s.pinyin_full, pinyinInitials: s.pinyin_initials, createTime: s.create_time,
+    canteenCount: s.canteen_count, dishCount: s.dish_count, userCount: s.user_count
+  })));
+});
+
+// POST /api/admin/schools { name, level, city, pinyinFull, pinyinInitials }
+router.post('/schools', (req, res) => {
+  const { name, level, city, pinyinFull, pinyinInitials } = req.body || {};
+  const nm = String(name || '').trim();
+  if (!nm) return fail(res, 400, '学校名称不能为空');
+  if (db.prepare('SELECT id FROM schools WHERE name = ?').get(nm)) return fail(res, 400, '该学校已存在');
+  const id = 'sch' + Date.now();
+  db.prepare(`
+    INSERT INTO schools (id, name, level, city, pinyin_full, pinyin_initials, create_time)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(id, nm, level === '专科' ? '专科' : '本科', String(city || '上海').trim() || '上海',
+    String(pinyinFull || '').trim(), String(pinyinInitials || '').trim(), new Date().toISOString());
+  ok(res, { id });
+});
+
+// PUT /api/admin/schools/:id 局部更新
+router.put('/schools/:id', (req, res) => {
+  const cur = db.prepare('SELECT * FROM schools WHERE id = ?').get(req.params.id);
+  if (!cur) return fail(res, 404, '学校不存在');
+  const b = req.body || {};
+  const name = b.name !== undefined ? String(b.name).trim() : cur.name;
+  if (!name) return fail(res, 400, '学校名称不能为空');
+  const dup = db.prepare('SELECT id FROM schools WHERE name = ? AND id <> ?').get(name, req.params.id);
+  if (dup) return fail(res, 400, '已存在同名学校');
+  db.prepare(`
+    UPDATE schools SET name = ?, level = ?, city = ?, pinyin_full = ?, pinyin_initials = ? WHERE id = ?
+  `).run(
+    name,
+    (b.level !== undefined ? (b.level === '专科' ? '专科' : '本科') : cur.level),
+    (b.city !== undefined ? String(b.city).trim() : cur.city),
+    (b.pinyinFull !== undefined ? String(b.pinyinFull).trim() : cur.pinyin_full),
+    (b.pinyinInitials !== undefined ? String(b.pinyinInitials).trim() : cur.pinyin_initials),
+    req.params.id
+  );
+  ok(res, { id: req.params.id });
+});
+
+// DELETE /api/admin/schools/:id
+// 默认拒绝删除仍有食堂或用户的学校（避免误删导致数据孤立）；?force=1 时级联删除该校食堂及其菜品/评价，
+// 并把该校用户置为「未选校」以便重新选择。
+router.delete('/schools/:id', (req, res) => {
+  const id = req.params.id;
+  const school = db.prepare('SELECT id, name FROM schools WHERE id = ?').get(id);
+  if (!school) return fail(res, 404, '学校不存在');
+  const canteenCount = db.prepare('SELECT COUNT(*) AS n FROM canteens WHERE school_id = ?').get(id).n;
+  const userCount = db.prepare('SELECT COUNT(*) AS n FROM users WHERE school_id = ?').get(id).n;
+  const force = req.query.force === '1';
+
+  if (!force && (canteenCount > 0 || userCount > 0)) {
+    return fail(res, 400, `该校仍有 ${canteenCount} 个食堂、${userCount} 名用户，请先转移或删除后再操作`);
+  }
+
+  db.exec('BEGIN');
+  try {
+    // 级联删除：收藏 → 评价 → 菜品 → 档口 → 食堂
+    db.prepare('DELETE FROM user_favorites WHERE dish_id IN (SELECT d.id FROM dishes d JOIN canteens c ON d.canteen_id = c.id WHERE c.school_id = ?)').run(id);
+    db.prepare('DELETE FROM reviews WHERE dish_id IN (SELECT d.id FROM dishes d JOIN canteens c ON d.canteen_id = c.id WHERE c.school_id = ?)').run(id);
+    db.prepare('DELETE FROM dishes WHERE canteen_id IN (SELECT id FROM canteens WHERE school_id = ?)').run(id);
+    db.prepare('DELETE FROM stalls WHERE canteen_id IN (SELECT id FROM canteens WHERE school_id = ?)').run(id);
+    db.prepare('DELETE FROM canteens WHERE school_id = ?').run(id);
+    // 用户不删除，置为未选校（下次打开应用会引导重新选校）
+    db.prepare("UPDATE users SET school_id = '' WHERE school_id = ?").run(id);
+    db.prepare('DELETE FROM schools WHERE id = ?').run(id);
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    return fail(res, 500, '删除失败');
+  }
+  ok(res, { id, canteenCount, userCount });
+});
+
 // ---------- 食堂 ----------
 
 router.get('/canteens', (req, res) => {
-  ok(res, db.prepare('SELECT * FROM canteens ORDER BY id').all());
+  const rows = db.prepare(`
+    SELECT c.*, s.name AS school_name
+    FROM canteens c LEFT JOIN schools s ON c.school_id = s.id
+    ORDER BY c.school_id, c.id
+  `).all();
+  ok(res, rows);
 });
 
 router.post('/canteens', (req, res) => {
-  const { name, location, openHours, floors, image } = req.body || {};
+  const { name, location, openHours, floors, image, schoolId } = req.body || {};
   if (!name) return fail(res, 400, '食堂名称不能为空');
+  if (!schoolId) return fail(res, 400, '请选择所属学校');
   const id = 'c' + Date.now();
-  db.prepare('INSERT INTO canteens (id, name, location, open_hours, floors, image) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(id, name, location || '', openHours || '', floors || 1, image || '');
+  db.prepare('INSERT INTO canteens (id, name, location, open_hours, floors, image, school_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(id, name, location || '', openHours || '', floors || 1, image || '', schoolId);
   ok(res, db.prepare('SELECT * FROM canteens WHERE id = ?').get(id));
 });
 
 router.put('/canteens/:id', (req, res) => {
-  const { name, location, openHours, floors, image } = req.body || {};
-  db.prepare('UPDATE canteens SET name = ?, location = ?, open_hours = ?, floors = ?, image = ? WHERE id = ?')
-    .run(name, location || '', openHours || '', floors || 1, image || '', req.params.id);
+  const { name, location, openHours, floors, image, schoolId } = req.body || {};
+  const exists = db.prepare('SELECT id FROM canteens WHERE id = ?').get(req.params.id);
+  if (!exists) return fail(res, 404, '食堂不存在');
+  if (!schoolId) return fail(res, 400, '请选择所属学校');
+  db.prepare('UPDATE canteens SET name = ?, location = ?, open_hours = ?, floors = ?, image = ?, school_id = ? WHERE id = ?')
+    .run(name, location || '', openHours || '', floors || 1, image || '', schoolId, req.params.id);
   ok(res, db.prepare('SELECT * FROM canteens WHERE id = ?').get(req.params.id));
 });
 
@@ -69,11 +168,27 @@ router.delete('/canteens/:id', (req, res) => {
 // ---------- 档口 ----------
 
 router.get('/stalls', (req, res) => {
-  const { canteenId } = req.query;
-  const rows = canteenId
-    ? db.prepare('SELECT * FROM stalls WHERE canteen_id = ? ORDER BY id').all(canteenId)
-    : db.prepare('SELECT * FROM stalls ORDER BY id').all();
-  ok(res, rows);
+  const { canteenId, schoolId, page, pageSize } = req.query;
+  const conds = [];
+  const params = [];
+  if (canteenId) { conds.push('s.canteen_id = ?'); params.push(canteenId); }
+  if (schoolId) { conds.push('c.school_id = ?'); params.push(schoolId); }
+  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+  const total = db.prepare(`
+    SELECT COUNT(*) AS n FROM stalls s LEFT JOIN canteens c ON s.canteen_id = c.id ${where}
+  `).get(...params).n;
+  const p = Math.max(1, parseInt(page || '1', 10) || 1);
+  const ps = Math.min(200, Math.max(1, parseInt(pageSize || '20', 10) || 20));
+  const list = db.prepare(`
+    SELECT s.*, c.school_id AS school_id, sch.name AS school_name
+    FROM stalls s
+    LEFT JOIN canteens c ON s.canteen_id = c.id
+    LEFT JOIN schools sch ON c.school_id = sch.id
+    ${where}
+    ORDER BY c.school_id, s.id
+    LIMIT ? OFFSET ?
+  `).all(...params, ps, (p - 1) * ps);
+  ok(res, { list, total, page: p, pageSize: ps, hasMore: p * ps < total });
 });
 
 router.post('/stalls', (req, res) => {
@@ -104,19 +219,36 @@ router.delete('/stalls/:id', (req, res) => {
 // ---------- 菜品 ----------
 
 router.get('/dishes', (req, res) => {
+  const { schoolId, page, pageSize } = req.query;
+  const conds = [];
+  const params = [];
+  if (schoolId) { conds.push('c.school_id = ?'); params.push(schoolId); }
+  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+  const total = db.prepare(`
+    SELECT COUNT(*) AS n FROM dishes d JOIN canteens c ON d.canteen_id = c.id ${where}
+  `).get(...params).n;
+  const p = Math.max(1, parseInt(page || '1', 10) || 1);
+  const ps = Math.min(200, Math.max(1, parseInt(pageSize || '20', 10) || 20));
   const rows = db.prepare(`
-    SELECT d.*, s.name AS stall_name, c.name AS canteen_name
+    SELECT d.*, s.name AS stall_name, c.name AS canteen_name, sch.name AS school_name
     FROM dishes d
     JOIN stalls s ON d.stall_id = s.id
     JOIN canteens c ON d.canteen_id = c.id
-    ORDER BY d.id
-  `).all();
-  ok(res, rows.map((d) => ({
-    id: d.id, stallId: d.stall_id, canteenId: d.canteen_id, name: d.name, price: d.price,
-    image: d.image, tags: JSON.parse(d.tags || '[]'), stallName: d.stall_name, canteenName: d.canteen_name,
-    rating: d.rating, reviewCount: d.review_count, isSignature: !!d.is_signature, soldOut: !!d.sold_out,
-    calories: d.calories, isVegetarian: !!d.is_vegetarian, allergens: JSON.parse(d.allergens || '[]')
-  })));
+    LEFT JOIN schools sch ON c.school_id = sch.id
+    ${where}
+    ORDER BY c.school_id, d.id
+    LIMIT ? OFFSET ?
+  `).all(...params, ps, (p - 1) * ps);
+  ok(res, {
+    list: rows.map((d) => ({
+      id: d.id, stallId: d.stall_id, canteenId: d.canteen_id, name: d.name, price: d.price,
+      image: d.image, tags: JSON.parse(d.tags || '[]'), stallName: d.stall_name, canteenName: d.canteen_name,
+      schoolName: d.school_name || '', rating: d.rating, reviewCount: d.review_count,
+      isSignature: !!d.is_signature, soldOut: !!d.sold_out, calories: d.calories,
+      isVegetarian: !!d.is_vegetarian, allergens: JSON.parse(d.allergens || '[]')
+    })),
+    total, page: p, pageSize: ps, hasMore: p * ps < total
+  });
 });
 
 router.post('/dishes', (req, res) => {
@@ -169,19 +301,81 @@ router.delete('/dishes/:id', (req, res) => {
 // ---------- 评价审核 ----------
 
 router.get('/reviews', (req, res) => {
-  const { status } = req.query;
-  const where = status ? 'WHERE r.status = ?' : '';
+  const { status, schoolId, keyword, page, pageSize } = req.query;
+  const conds = [];
+  const params = [];
+  if (status) { conds.push('r.status = ?'); params.push(status); }
+  if (schoolId) { conds.push('c.school_id = ?'); params.push(schoolId); }
+  const kw = String(keyword || '').trim();
+  if (kw) { conds.push('(r.content LIKE ? OR d.name LIKE ?)'); params.push('%' + kw + '%', '%' + kw + '%'); }
+  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+  const total = db.prepare(`
+    SELECT COUNT(*) AS n FROM reviews r JOIN dishes d ON r.dish_id = d.id
+    LEFT JOIN canteens c ON d.canteen_id = c.id ${where}
+  `).get(...params).n;
+  const p = Math.max(1, parseInt(page || '1', 10) || 1);
+  const ps = Math.min(200, Math.max(1, parseInt(pageSize || '20', 10) || 20));
   const rows = db.prepare(`
-    SELECT r.*, d.name AS dish_name
-    FROM reviews r JOIN dishes d ON r.dish_id = d.id ${where}
-    ORDER BY r.create_time DESC LIMIT 200
-  `).all(...(status ? [status] : []));
-  ok(res, rows.map((r) => ({
-    id: r.id, dishId: r.dish_id, dishName: r.dish_name, rating: r.rating,
-    content: r.content, images: JSON.parse(r.images || '[]'), likes: r.likes,
-    isAnonymous: !!r.is_anonymous, status: r.status,
-    rejectReason: r.reject_reason || '', createTime: r.create_time
-  })));
+    SELECT r.*, d.name AS dish_name, c.school_id AS school_id, s.name AS school_name
+    FROM reviews r
+    JOIN dishes d ON r.dish_id = d.id
+    LEFT JOIN canteens c ON d.canteen_id = c.id
+    LEFT JOIN schools s ON c.school_id = s.id
+    ${where}
+    ORDER BY r.create_time DESC LIMIT ? OFFSET ?
+  `).all(...params, ps, (p - 1) * ps);
+  ok(res, {
+    list: rows.map((r) => ({
+      id: r.id, dishId: r.dish_id, dishName: r.dish_name, rating: r.rating,
+      content: r.content, images: JSON.parse(r.images || '[]'), likes: r.likes,
+      isAnonymous: !!r.is_anonymous, status: r.status,
+      rejectReason: r.reject_reason || '', moderationRule: r.moderation_rule || '',
+      schoolId: r.school_id || '', schoolName: r.school_name || '',
+      createTime: r.create_time
+    })),
+    total, page: p, pageSize: ps, hasMore: p * ps < total
+  });
+});
+
+// DELETE /api/admin/reviews/:id 直接删除单条评价（违规内容即时下架，并重算菜品统计）
+// 关联的举报记录保留，作为处理留痕（举报列表会显示「评价已删除」）
+router.delete('/reviews/:id', (req, res) => {
+  const r = db.prepare('SELECT id, dish_id FROM reviews WHERE id = ?').get(req.params.id);
+  if (!r) return fail(res, 404, '评价不存在');
+  db.prepare('DELETE FROM review_likes WHERE review_id = ?').run(req.params.id);
+  db.prepare('DELETE FROM reviews WHERE id = ?').run(req.params.id);
+  db.recalcDishStats(r.dish_id);
+  ok(res, { id: req.params.id });
+});
+
+// POST /api/admin/reviews/batch-status { ids: string[], status, rejectReason? } 批量审核
+router.post('/reviews/batch-status', (req, res) => {
+  const { ids, status, rejectReason } = req.body || {};
+  if (!Array.isArray(ids) || ids.length === 0) return fail(res, 400, '请先勾选要操作的评价');
+  if (status !== 'approved' && status !== 'rejected' && status !== 'pending') return fail(res, 400, '状态非法');
+  const reason = status === 'rejected' ? String(rejectReason || '未通过审核') : '';
+
+  const sel = db.prepare('SELECT id, dish_id FROM reviews WHERE id = ?');
+  const upd = db.prepare('UPDATE reviews SET status = ?, reject_reason = ? WHERE id = ?');
+  const dishes = new Set();
+  let updated = 0;
+  db.exec('BEGIN');
+  try {
+    for (const raw of ids) {
+      const row = sel.get(String(raw));
+      if (!row) continue;
+      upd.run(status, reason, row.id);
+      dishes.add(row.dish_id);
+      updated++;
+    }
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    return fail(res, 500, '批量操作失败');
+  }
+  // 状态流转影响「已通过」集合，逐个重算受影响菜品
+  for (const dishId of dishes) db.recalcDishStats(dishId);
+  ok(res, { updated, status });
 });
 
 // PUT /api/admin/reviews/:id/status { status: 'approved' | 'rejected' | 'pending', rejectReason? }
@@ -240,29 +434,46 @@ router.put('/settings', (req, res) => {
 
 // ---------- 举报处理 ----------
 
-// GET /api/admin/reports?status=pending
+// GET /api/admin/reports?status=pending&schoolId=xxx&page=1&pageSize=20
 router.get('/reports', (req, res) => {
-  const { status } = req.query;
-  const where = status ? 'WHERE p.status = ?' : '';
-  const rows = db.prepare(`
-    SELECT p.*, r.content AS review_content, r.status AS review_status, d.name AS dish_name
+  const { status, schoolId, page, pageSize } = req.query;
+  const conds = [];
+  const params = [];
+  if (status) { conds.push('p.status = ?'); params.push(status); }
+  if (schoolId) { conds.push('c.school_id = ?'); params.push(schoolId); }
+  const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
+  const joins = `
     FROM review_reports p
     LEFT JOIN reviews r ON p.review_id = r.id
     LEFT JOIN dishes d ON r.dish_id = d.id
+    LEFT JOIN canteens c ON d.canteen_id = c.id
+    LEFT JOIN schools s ON c.school_id = s.id
+  `;
+  const total = db.prepare(`SELECT COUNT(*) AS n ${joins} ${where}`).get(...params).n;
+  const p = Math.max(1, parseInt(page || '1', 10) || 1);
+  const ps = Math.min(200, Math.max(1, parseInt(pageSize || '20', 10) || 20));
+  const rows = db.prepare(`
+    SELECT p.*, r.content AS review_content, r.status AS review_status, d.name AS dish_name,
+           s.name AS school_name
+    ${joins}
     ${where}
-    ORDER BY p.create_time DESC LIMIT 200
-  `).all(...(status ? [status] : []));
-  ok(res, rows.map((p) => ({
-    id: p.id,
-    reviewId: p.review_id,
-    reviewContent: p.review_content || '（评价已删除）',
-    reviewStatus: p.review_status || '',
-    dishName: p.dish_name || '',
-    reason: p.reason,
-    detail: p.detail,
-    status: p.status,
-    createTime: p.create_time
-  })));
+    ORDER BY p.create_time DESC LIMIT ? OFFSET ?
+  `).all(...params, ps, (p - 1) * ps);
+  ok(res, {
+    list: rows.map((p2) => ({
+      id: p2.id,
+      reviewId: p2.review_id,
+      reviewContent: p2.review_content || '（评价已删除）',
+      reviewStatus: p2.review_status || '',
+      dishName: p2.dish_name || '',
+      schoolName: p2.school_name || '',
+      reason: p2.reason,
+      detail: p2.detail,
+      status: p2.status,
+      createTime: p2.create_time
+    })),
+    total, page: p, pageSize: ps, hasMore: p * ps < total
+  });
 });
 
 // PUT /api/admin/reports/:id { status: 'handled' | 'ignored', reviewStatus?: 'approved' | 'rejected' }

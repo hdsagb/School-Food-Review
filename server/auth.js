@@ -77,6 +77,16 @@ function verifyPassword(password, stored) {
   }
 }
 
+/** 可选游客身份：带有效 token 则解析出用户（供「按学校过滤内容」使用），无 token 不拦截 */
+function optionalGuest(req, res, next) {
+  const token = parseBearer(req);
+  if (token) {
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(token);
+    if (user) req.user = user;
+  }
+  next();
+}
+
 /** 注册用户鉴权：游客 token 仅可浏览，写操作要求已注册账号（code=2 引导登录） */
 function registeredAuth(req, res, next) {
   guestAuth(req, res, () => {
@@ -88,4 +98,7 @@ function registeredAuth(req, res, next) {
   });
 }
 
-module.exports = { parseBearer, genToken, guestAuth, adminAuth, authAny, registeredAuth, hashPassword, verifyPassword };
+module.exports = {
+  parseBearer, genToken, guestAuth, adminAuth, authAny, optionalGuest, registeredAuth,
+  hashPassword, verifyPassword
+};

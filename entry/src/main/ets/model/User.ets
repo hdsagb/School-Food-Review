@@ -7,18 +7,24 @@ export class User {
   avatar: string;
   favorites: string[];
   username: string;
+  schoolId: string;
+  schoolName: string;
 
   constructor(
     id: string = '',
     nickname: string = '',
     avatar: string = '',
     favorites: string[] = [],
-    username: string = ''
+    username: string = '',
+    schoolId: string = '',
+    schoolName: string = ''
   ) {
     this.id = id;
     this.nickname = nickname;
     this.avatar = avatar;
     this.favorites = favorites;
     this.username = username;
+    this.schoolId = schoolId;
+    this.schoolName = schoolName;
   }
 }

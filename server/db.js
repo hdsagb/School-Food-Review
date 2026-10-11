@@ -13,13 +13,25 @@ const db = new DatabaseSync(DB_PATH);
 db.exec(`
 PRAGMA journal_mode = WAL;
 
+-- 学校维度：食堂 / 用户均挂到某一所学校，实现「不同学校数据不互通」
+CREATE TABLE IF NOT EXISTS schools (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  level TEXT DEFAULT '本科',
+  city TEXT DEFAULT '上海',
+  pinyin_full TEXT DEFAULT '',
+  pinyin_initials TEXT DEFAULT '',
+  create_time TEXT DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS canteens (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   location TEXT DEFAULT '',
   open_hours TEXT DEFAULT '',
   floors INTEGER DEFAULT 1,
-  image TEXT DEFAULT ''
+  image TEXT DEFAULT '',
+  school_id TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS stalls (
@@ -53,7 +65,8 @@ CREATE TABLE IF NOT EXISTS users (
   nickname TEXT NOT NULL,
   avatar TEXT DEFAULT '',
   username TEXT DEFAULT '',
-  password_hash TEXT DEFAULT ''
+  password_hash TEXT DEFAULT '',
+  school_id TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS user_favorites (
@@ -144,8 +157,16 @@ try { db.exec(`ALTER TABLE users ADD COLUMN username TEXT DEFAULT ''`); } catch 
 try { db.exec(`ALTER TABLE users ADD COLUMN password_hash TEXT DEFAULT ''`); } catch (e) { /* 列已存在 */ }
 // 审核驳回原因（先审后发下，本人需要看到驳回理由）
 try { db.exec(`ALTER TABLE reviews ADD COLUMN reject_reason TEXT DEFAULT ''`); } catch (e) { /* 列已存在 */ }
+// 自动驳回规则名（banned_word / ad_contact / flood / duplicate，空串表示人工处理），供后台区分自动/人工驳回
+try { db.exec(`ALTER TABLE reviews ADD COLUMN moderation_rule TEXT DEFAULT ''`); } catch (e) { /* 列已存在 */ }
 // 注册用户名唯一（游客 username 为空串，不参与唯一约束）
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username) WHERE username <> ''`);
+
+// ---------- 旧库迁移：canteens / users 补 school_id 列（学校维度上线） ----------
+try { db.exec(`ALTER TABLE canteens ADD COLUMN school_id TEXT DEFAULT ''`); } catch (e) { /* 列已存在 */ }
+try { db.exec(`ALTER TABLE users ADD COLUMN school_id TEXT DEFAULT ''`); } catch (e) { /* 列已存在 */ }
+// 首页按学校过滤食堂，建索引避免全表扫描
+db.exec(`CREATE INDEX IF NOT EXISTS idx_canteens_school ON canteens(school_id)`);
 
 /** 判断是否需要播种（以 dishes 表为空为准） */
 function needSeed() {
@@ -237,6 +258,98 @@ if (needSeed()) {
   seed();
   console.log('[db] 种子数据已写入', DB_PATH);
 }
+
+// ---------- 学校种子数据（幂等：仅当 schools 表为空时播种） ----------
+// 名单来源：上海市教育考试院 / 教育部《全国高等学校名单》（截至 2026-06-17，上海本科 40 所 + 高职 29 所，
+// 本表录入现仍在招生的 40 所本科与 27 所高职专科，后续可在管理端补充）。
+// pinyin_full / pinyin_initials 供 App 端按「中文子串 / 全拼 / 首字母」检索，多音字已人工校对。
+const SHANGHAI_SCHOOLS = [
+  // [名称, 层次, 全拼, 首字母]
+  ['复旦大学', '本科', 'fudan', 'fd'],
+  ['同济大学', '本科', 'tongji', 'tj'],
+  ['上海交通大学', '本科', 'shanghaijiaotong', 'shjt'],
+  ['华东理工大学', '本科', 'huadongligong', 'hdlg'],
+  ['上海理工大学', '本科', 'shanghailigong', 'shlg'],
+  ['上海海事大学', '本科', 'shanghaihaishi', 'shhs'],
+  ['东华大学', '本科', 'donghua', 'dh'],
+  ['上海电力大学', '本科', 'shanghaidianli', 'shdl'],
+  ['上海应用技术大学', '本科', 'shanghaiyingyongjishu', 'shyysj'],
+  ['上海健康医学院', '本科', 'shanghaijiankangyixueyuan', 'shjkyx'],
+  ['上海海洋大学', '本科', 'shanghaihaiyang', 'shhy'],
+  ['上海中医药大学', '本科', 'shanghaizhongyiyao', 'shzyy'],
+  ['华东师范大学', '本科', 'huadongshifan', 'hdsf'],
+  ['上海师范大学', '本科', 'shanghaishifan', 'shsf'],
+  ['上海外国语大学', '本科', 'shanghaiwaiguoyu', 'shwgy'],
+  ['上海财经大学', '本科', 'shanghaicaijing', 'shcj'],
+  ['上海对外经贸大学', '本科', 'shanghaiduiwaijingmao', 'shdwjm'],
+  ['上海海关学院', '本科', 'shanghaihaiguan', 'shhg'],
+  ['华东政法大学', '本科', 'huadongzhengfa', 'hdzf'],
+  ['上海体育大学', '本科', 'shanghaitiyu', 'shty'],
+  ['上海音乐学院', '本科', 'shanghaiyinyue', 'shyy'],
+  ['上海戏剧学院', '本科', 'shanghaixiju', 'shxj'],
+  ['上海大学', '本科', 'shanghaidaxue', 'shdx'],
+  ['上海公安学院', '本科', 'shanghaigongan', 'shga'],
+  ['上海工程技术大学', '本科', 'shanghaigongchengjishu', 'shgcjs'],
+  ['上海立信会计金融学院', '本科', 'shanghailixinkuaijijinrong', 'shlxkj'],
+  ['上海电机学院', '本科', 'shanghaidianji', 'shdj'],
+  ['上海杉达学院', '本科', 'shanghaishanda', 'shsd'],
+  ['上海政法学院', '本科', 'shanghaizhengfa', 'shzf'],
+  ['上海第二工业大学', '本科', 'shanghaidiergongye', 'shdegy'],
+  ['上海商学院', '本科', 'shanghaishangxueyuan', 'shsxy'],
+  ['上海立达学院', '本科', 'shanghailida', 'shld'],
+  ['上海建桥学院', '本科', 'shanghaijianqiao', 'shjq'],
+  ['上海兴伟学院', '本科', 'shanghaixingwei', 'shxw'],
+  ['上海中侨职业技术大学', '本科', 'shanghaizhongqiao', 'shzq'],
+  ['上海视觉艺术学院', '本科', 'shanghaishijueyishu', 'shsjs'],
+  ['上海外国语大学贤达经济人文学院', '本科', 'shanghaiwaiguoyuxianda', 'shwgxd'],
+  ['上海师范大学天华学院', '本科', 'shanghaishifantianhua', 'shsfth'],
+  ['上海科技大学', '本科', 'shanghaikeji', 'shkj'],
+  ['上海纽约大学', '本科', 'shanghainiuyue', 'shny'],
+  ['上海旅游高等专科学校', '专科', 'shanghailvyou', 'shly'],
+  ['上海出版印刷高等专科学校', '专科', 'shanghaichubanyinshua', 'shcbys'],
+  ['上海济光职业技术学院', '专科', 'shanghaijiguang', 'shjg'],
+  ['上海工商外国语职业学院', '专科', 'shanghaigongshangwaiguoyu', 'shgswgy'],
+  ['上海东海职业技术学院', '专科', 'shanghaidonghai', 'shdh'],
+  ['上海工商职业技术学院', '专科', 'shanghaigongshang', 'shgs'],
+  ['上海科学技术职业学院', '专科', 'shanghaikexuejishu', 'shkxjs'],
+  ['上海海事职业技术学院', '专科', 'shanghaihaishi', 'shhs'],
+  ['上海交通职业技术学院', '专科', 'shanghaijiaotong', 'shjt'],
+  ['上海电子信息职业技术学院', '专科', 'shanghaidianzixinxi', 'shdzxx'],
+  ['上海城建职业学院', '专科', 'shanghaichengjian', 'shcj'],
+  ['上海行健职业学院', '专科', 'shanghaixingjian', 'shxj'],
+  ['上海工艺美术职业学院', '专科', 'shanghaigongyimeishu', 'shgyms'],
+  ['上海邦德职业技术学院', '专科', 'shanghaibangde', 'shbd'],
+  ['上海农林职业技术学院', '专科', 'shanghainonglin', 'shnl'],
+  ['上海震旦职业学院', '专科', 'shanghaizhendan', 'shzd'],
+  ['上海思博职业技术学院', '专科', 'shanghaisibo', 'shsb'],
+  ['上海民远职业技术学院', '专科', 'shanghaiminyuan', 'shmy'],
+  ['上海电影艺术职业学院', '专科', 'shanghaidianying', 'shdy'],
+  ['上海民航职业技术学院', '专科', 'shanghaiminhang', 'shmh'],
+  ['上海南湖职业技术学院', '专科', 'shanghainanhu', 'shnh'],
+  ['上海科创职业技术学院', '专科', 'shanghaikechuang', 'shkc'],
+  ['上海闵行职业技术学院', '专科', 'shanghaiminxing', 'shmx'],
+  ['上海现代化工职业学院', '专科', 'shanghaixiandaihuagong', 'shxdhg'],
+  ['上海建设管理职业技术学院', '专科', 'shanghaijiansheguanli', 'shjsgl'],
+  ['上海浦东职业技术学院', '专科', 'shanghaipudong', 'shpd'],
+  ['上海中华职业技术学院', '专科', 'shanghaizhonghua', 'shzh']
+];
+
+const schoolCount = db.prepare('SELECT COUNT(*) AS n FROM schools').get().n;
+if (schoolCount === 0) {
+  const insSchool = db.prepare(`
+    INSERT OR IGNORE INTO schools (id, name, level, city, pinyin_full, pinyin_initials, create_time)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`);
+  const schoolSeedTime = new Date().toISOString();
+  // 测试学校：承接现有演示数据，仅用于开发联调，上线前删除
+  insSchool.run('sch_test', 'text school', '本科', '上海', 'testschool', 'ts', schoolSeedTime);
+  SHANGHAI_SCHOOLS.forEach((s, i) => {
+    insSchool.run(`sch${String(i + 1).padStart(2, '0')}`, s[0], s[1], '上海', s[2], s[3], schoolSeedTime);
+  });
+  console.log(`[db] 学校数据已写入（${SHANGHAI_SCHOOLS.length} 所 + 1 所测试学校）`);
+}
+
+// 现有食堂（演示数据 c1/c2/c3）划归测试学校：保证存量数据在选校功能上线后仍可见
+db.prepare("UPDATE canteens SET school_id = 'sch_test' WHERE school_id = '' OR school_id IS NULL").run();
 
 /**
  * 按「已通过审核」的评价重算菜品的评分与评价数。

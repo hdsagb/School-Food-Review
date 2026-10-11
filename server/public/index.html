@@ -40,6 +40,9 @@
   #loginBox h2 { margin-bottom: 16px; }
   .hidden { display: none; }
   .thumb { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; background: #eef1ef; }
+  .pager { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 12px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; padding: 10px; background: #f7faf8; border-radius: 8px; }
+  .toolbar .muted { margin-left: auto; }
 </style>
 </head>
 <body>
@@ -60,7 +63,8 @@
 
 <div id="appBox" class="hidden">
   <nav>
-    <button class="active" data-view="canteens">食堂</button>
+    <button class="active" data-view="schools">学校</button>
+    <button data-view="canteens">食堂</button>
     <button data-view="stalls">档口</button>
     <button data-view="dishes">菜品</button>
     <button data-view="reviews">评价审核</button>
@@ -69,20 +73,46 @@
     <button data-view="settings">评价上限</button>
   </nav>
   <main>
+    <!-- 学校 -->
+    <section id="view-schools">
+      <div class="card">
+        <h2>新增学校</h2>
+        <div class="form-row">
+          <input id="scName" placeholder="学校名称，如 复旦大学">
+          <select id="scLevel" style="flex:0; min-width:100px;">
+            <option value="本科">本科</option>
+            <option value="专科">专科</option>
+          </select>
+          <input id="scCity" placeholder="城市，如 上海" style="max-width:120px;">
+        </div>
+        <div class="form-row">
+          <input id="scPinyinFull" placeholder="全拼，如 fudan（供 App 搜索）">
+          <input id="scPinyinInit" placeholder="首字母，如 fd" style="max-width:160px;">
+          <button class="btn btn-primary" onclick="saveSchool()">保存</button>
+        </div>
+        <p class="muted">App 端按「中文子串 / 全拼 / 首字母」检索学校，拼音字段请填写完整以保证可搜到。</p>
+      </div>
+      <div class="card"><h2>学校列表</h2><table>
+        <thead><tr><th>名称</th><th>层次</th><th>城市</th><th>全拼 / 首字母</th><th>食堂</th><th>菜品</th><th>用户</th><th>操作</th></tr></thead>
+        <tbody id="schoolList"></tbody>
+      </table></div>
+    </section>
     <!-- 食堂 -->
-    <section id="view-canteens">
+    <section id="view-canteens" class="hidden">
       <div class="card">
         <h2>新增食堂</h2>
         <div class="form-row">
+          <select id="cSchool" style="max-width:220px;"></select>
           <input id="cName" placeholder="名称，如 第三食堂">
           <input id="cLoc" placeholder="位置，如 校园南区">
           <input id="cHours" placeholder="营业时间，如 06:30-21:00" style="max-width:160px;">
           <input id="cFloors" type="number" placeholder="楼层" style="max-width:80px;">
           <button class="btn btn-primary" onclick="saveCanteen()">保存</button>
         </div>
+        <p class="muted">食堂必须归属某一所学校，App 端只会展示用户自己学校的食堂。</p>
       </div>
       <div class="card"><h2>食堂列表</h2><table>
-        <thead><tr><th>名称</th><th>位置</th><th>营业时间</th><th>楼层</th><th>操作</th></tr></thead>
+        <thead><tr><th>学校</th><th>名称</th><th>位置</th><th>营业时间</th><th>楼层</th><th>操作</th></tr></thead>
         <tbody id="canteenList"></tbody>
       </table></div>
     </section>
@@ -98,10 +128,22 @@
           <button class="btn btn-primary" onclick="saveStall()">保存</button>
         </div>
       </div>
-      <div class="card"><h2>档口列表</h2><table>
-        <thead><tr><th>食堂</th><th>名称</th><th>楼层</th><th>菜系</th><th>操作</th></tr></thead>
+      <div class="card"><h2>档口列表</h2>
+        <div class="form-row" style="margin-bottom:12px;">
+          <label>学校</label>
+          <select id="stallSchoolFilter" style="max-width:220px;" onchange="pageState.stalls.page=1;loadStalls()"></select>
+          <span class="muted">按学校过滤，避免多校同名档口混在一起。</span>
+        </div>
+        <table>
+        <thead><tr><th>学校</th><th>食堂</th><th>名称</th><th>楼层</th><th>菜系</th><th>操作</th></tr></thead>
         <tbody id="stallList"></tbody>
-      </table></div>
+        </table>
+        <div class="pager">
+          <button class="btn btn-ghost btn-sm" onclick="pagePrev('stalls')">上一页</button>
+          <span id="stallsPageInfo" class="muted"></span>
+          <button class="btn btn-ghost btn-sm" onclick="pageNext('stalls')">下一页</button>
+        </div>
+      </div>
     </section>
     <!-- 菜品 -->
     <section id="view-dishes" class="hidden">
@@ -127,28 +169,57 @@
         </div>
         <div class="form-row"><input id="dAllergens" placeholder="过敏原，逗号分隔，如 花生,麸质"><button class="btn btn-primary" onclick="saveDish()">保存</button></div>
       </div>
-      <div class="card"><h2>菜品列表</h2><table>
-        <thead><tr><th></th><th>名称</th><th>食堂/档口</th><th>价格</th><th>标签</th><th>评分</th><th>售罄</th><th>操作</th></tr></thead>
+      <div class="card"><h2>菜品列表</h2>
+        <div class="form-row" style="margin-bottom:12px;">
+          <label>学校</label>
+          <select id="dishSchoolFilter" style="max-width:220px;" onchange="pageState.dishes.page=1;loadDishes()"></select>
+          <span class="muted">按学校过滤，核对某一所学校的在售菜单。</span>
+        </div>
+        <table>
+        <thead><tr><th></th><th>学校</th><th>名称</th><th>食堂/档口</th><th>价格</th><th>标签</th><th>评分</th><th>售罄</th><th>操作</th></tr></thead>
         <tbody id="dishList"></tbody>
-      </table></div>
+        </table>
+        <div class="pager">
+          <button class="btn btn-ghost btn-sm" onclick="pagePrev('dishes')">上一页</button>
+          <span id="dishesPageInfo" class="muted"></span>
+          <button class="btn btn-ghost btn-sm" onclick="pageNext('dishes')">下一页</button>
+        </div>
+      </div>
     </section>
     <!-- 评价审核 -->
     <section id="view-reviews" class="hidden">
       <div class="card">
         <div class="form-row" style="margin-bottom:12px;">
           <label>状态</label>
-          <select id="reviewStatusFilter" onchange="loadReviews()" style="max-width:180px;">
+          <select id="reviewStatusFilter" style="max-width:180px;" onchange="pageState.reviews.page=1;loadReviews()">
             <option value="pending">待审核</option>
             <option value="">全部</option>
             <option value="approved">已通过</option>
             <option value="rejected">已拒绝</option>
           </select>
+          <label style="min-width:auto;">学校</label>
+          <select id="reviewSchoolFilter" style="max-width:220px;" onchange="pageState.reviews.page=1;loadReviews()"></select>
+          <input id="reviewKeyword" placeholder="按评价内容 / 菜品名搜索" style="max-width:220px;" onchange="pageState.reviews.page=1;loadReviews()">
+          <button class="btn btn-ghost btn-sm" onclick="pageState.reviews.page=1;loadReviews()">搜索</button>
           <span class="muted">新提交的评价默认待审核，审核通过后才会对外公开；被驳回的评价仅作者本人可见。</span>
         </div>
+        <div class="toolbar">
+          <input type="checkbox" id="batchAll" onclick="toggleAllReviews(this.checked)">
+          <label for="batchAll" style="font-size:13px; color:#556;">全选本页</label>
+          <input id="batchReason" placeholder="批量驳回原因（可留空）" style="border:1px solid #d5ddd9; border-radius:6px; padding:6px 10px; font-size:13px; width:200px;">
+          <button class="btn btn-primary btn-sm" onclick="batchReview('approved')">批量通过</button>
+          <button class="btn btn-danger btn-sm" onclick="batchReview('rejected')">批量驳回</button>
+          <span id="batchCount" class="muted">已选 0 条</span>
+        </div>
         <table>
-          <thead><tr><th>菜品</th><th>评分</th><th>内容</th><th>点赞</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
+          <thead><tr><th style="width:32px;"></th><th>学校</th><th>菜品</th><th>评分</th><th>内容</th><th>点赞</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
           <tbody id="reviewList"></tbody>
         </table>
+        <div class="pager">
+          <button class="btn btn-ghost btn-sm" onclick="pagePrev('reviews')">上一页</button>
+          <span id="reviewsPageInfo" class="muted"></span>
+          <button class="btn btn-ghost btn-sm" onclick="pageNext('reviews')">下一页</button>
+        </div>
       </div>
     </section>
     <!-- 举报处理 -->
@@ -156,18 +227,25 @@
       <div class="card">
         <div class="form-row" style="margin-bottom:12px;">
           <label>状态</label>
-          <select id="reportStatusFilter" onchange="loadReports()" style="max-width:180px;">
+          <select id="reportStatusFilter" style="max-width:180px;" onchange="pageState.reports.page=1;loadReports()">
             <option value="pending">待处理</option>
             <option value="">全部</option>
             <option value="handled">已处理</option>
             <option value="ignored">已忽略</option>
           </select>
+          <label style="min-width:auto;">学校</label>
+          <select id="reportSchoolFilter" style="max-width:220px;" onchange="pageState.reports.page=1;loadReports()"></select>
           <span class="muted">举报后该评价会立即下架转待审核，请在处理举报时一并裁决评价是否恢复。</span>
         </div>
         <table>
-          <thead><tr><th>菜品</th><th>评价内容</th><th>举报原因</th><th>评价状态</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
+          <thead><tr><th>学校</th><th>菜品</th><th>评价内容</th><th>举报原因</th><th>评价状态</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
           <tbody id="reportList"></tbody>
         </table>
+        <div class="pager">
+          <button class="btn btn-ghost btn-sm" onclick="pagePrev('reports')">上一页</button>
+          <span id="reportsPageInfo" class="muted"></span>
+          <button class="btn btn-ghost btn-sm" onclick="pageNext('reports')">下一页</button>
+        </div>
       </div>
     </section>
     <!-- 敏感词库 -->
@@ -204,8 +282,35 @@
 <script>
 const API = '/api';
 let token = localStorage.getItem('admin_token') || '';
-let curView = 'canteens';
+let curView = 'schools';
 let editTarget = null; // 当前编辑对象 {type, id}
+
+// 各列表分页状态（服务端分页，去掉原先 LIMIT 200 硬截断）
+const pageState = {
+  stalls: { page: 1, size: 20, total: 0 },
+  dishes: { page: 1, size: 20, total: 0 },
+  reviews: { page: 1, size: 20, total: 0 },
+  reports: { page: 1, size: 20, total: 0 }
+};
+function renderPager(view) {
+  const s = pageState[view];
+  const pages = Math.max(1, Math.ceil(s.total / s.size));
+  document.getElementById(view + 'PageInfo').textContent = `第 ${s.page} / ${pages} 页 · 共 ${s.total} 条`;
+}
+function pagePrev(view) {
+  if (pageState[view].page <= 1) return;
+  pageState[view].page -= 1;
+  loadView(view);
+}
+function pageNext(view) {
+  const s = pageState[view];
+  if (s.page * s.size >= s.total) return;
+  s.page += 1;
+  loadView(view);
+}
+function resetPages() {
+  Object.keys(pageState).forEach((k) => { pageState[k].page = 1; });
+}
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -239,7 +344,7 @@ function enterApp(name) {
   document.getElementById('appBox').classList.remove('hidden');
   document.getElementById('logout').classList.remove('hidden');
   document.getElementById('adminName').textContent = name;
-  switchView('canteens');
+  switchView('schools');
   loadAll();
 }
 function logout() {
@@ -260,22 +365,112 @@ function switchView(v) {
 }
 document.querySelectorAll('nav button').forEach((b) => b.onclick = () => switchView(b.dataset.view));
 
-async function loadAll() { await Promise.all([loadCanteens(), loadStalls(), loadDishes(), loadReviews(), loadSettings()]); }
-function loadView(v) { ({ canteens: loadCanteens, stalls: loadStalls, dishes: loadDishes, reviews: loadReviews, reports: loadReports, words: loadWords, settings: loadSettings })[v](); }
+async function loadAll() {
+  // 先取学校列表（填充「所属学校」与审核筛选下拉），再并行加载其余分区
+  await loadSchools();
+  await Promise.all([loadCanteens(), loadStalls(), loadDishes(), loadReviews(), loadReports(), loadSettings()]);
+}
+function loadView(v) { ({ schools: loadSchools, canteens: loadCanteens, stalls: loadStalls, dishes: loadDishes, reviews: loadReviews, reports: loadReports, words: loadWords, settings: loadSettings })[v](); }
+
+// 学校
+let schoolOptions = []; // 缓存学校列表，供各下拉复用
+
+async function loadSchools() {
+  const list = await api('/admin/schools');
+  schoolOptions = list;
+  document.getElementById('schoolList').innerHTML = list.map((s) => `
+    <tr>
+      <td><strong>${esc(s.name)}</strong></td>
+      <td>${esc(s.level)}</td>
+      <td>${esc(s.city)}</td>
+      <td class="muted">${esc(s.pinyinFull)} / ${esc(s.pinyinInitials)}</td>
+      <td>${s.canteenCount}</td>
+      <td>${s.dishCount}</td>
+      <td>${s.userCount}</td>
+      <td>
+        <button class="btn btn-ghost btn-sm" onclick='editSchool(${JSON.stringify(s).replace(/'/g, "&#39;")})'>编辑</button>
+        <button class="btn btn-danger btn-sm" onclick="delSchool('${s.id}')">删除</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="8" class="muted">暂无数据</td></tr>';
+  fillSchoolSelects();
+}
+/** 用学校列表填充「所属学校」与审核/举报的「学校」筛选下拉，尽量保留原选中值 */
+function fillSchoolSelects() {
+  const fill = (id, emptyLabel) => {
+    const sel = document.getElementById(id);
+    const cur = sel.value;
+    sel.innerHTML = (emptyLabel ? `<option value="">${emptyLabel}</option>` : '')
+      + schoolOptions.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+    if (cur) sel.value = cur;
+  };
+  fill('cSchool', '');
+  fill('reviewSchoolFilter', '全部学校');
+  fill('reportSchoolFilter', '全部学校');
+  fill('stallSchoolFilter', '全部学校');
+  fill('dishSchoolFilter', '全部学校');
+}
+function editSchool(s) {
+  editTarget = { type: 'school', id: s.id };
+  document.getElementById('scName').value = s.name;
+  document.getElementById('scLevel').value = s.level === '专科' ? '专科' : '本科';
+  document.getElementById('scCity').value = s.city;
+  document.getElementById('scPinyinFull').value = s.pinyinFull;
+  document.getElementById('scPinyinInit').value = s.pinyinInitials;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+async function saveSchool() {
+  const body = {
+    name: document.getElementById('scName').value.trim(),
+    level: document.getElementById('scLevel').value,
+    city: document.getElementById('scCity').value.trim(),
+    pinyinFull: document.getElementById('scPinyinFull').value.trim(),
+    pinyinInitials: document.getElementById('scPinyinInit').value.trim()
+  };
+  if (!body.name) return toast('名称不能为空');
+  try {
+    if (editTarget && editTarget.type === 'school') { await api('/admin/schools/' + editTarget.id, 'PUT', body); editTarget = null; }
+    else { await api('/admin/schools', 'POST', body); }
+    ['scName','scCity','scPinyinFull','scPinyinInit'].forEach((id) => document.getElementById(id).value = '');
+    await loadSchools();
+    toast('已保存');
+  } catch (e) { toast(e.message); }
+}
+async function delSchool(id) {
+  const s = schoolOptions.find((x) => x.id === id) || {};
+  let url = '/admin/schools/' + id;
+  if (s.canteenCount > 0 || s.userCount > 0) {
+    const msg = `「${s.name}」下有 ${s.canteenCount} 个食堂、${s.userCount} 名用户。\n`
+      + '强制删除会级联清除该校全部食堂 / 档口 / 菜品 / 评价，并把该校用户置为「未选校」。\n此操作不可恢复，确定继续？';
+    if (!confirm(msg)) return;
+    url += '?force=1';
+  } else if (!confirm(`确定删除「${s.name}」？`)) {
+    return;
+  }
+  try {
+    await api(url, 'DELETE');
+    resetPages();
+    await loadSchools();
+    await Promise.all([loadCanteens(), loadStalls(), loadDishes(), loadReviews(), loadReports()]);
+    toast('已删除');
+  } catch (e) { toast(e.message); }
+}
 
 // 食堂
 async function loadCanteens() {
+  if (!schoolOptions.length) await loadSchools();
   const list = await api('/admin/canteens');
   document.getElementById('canteenList').innerHTML = list.map((c) => `
     <tr>
+      <td>${c.school_name ? esc(c.school_name) : '<span class="soldout">未归属</span>'}</td>
       <td><strong>${esc(c.name)}</strong></td><td>${esc(c.location)}</td><td>${esc(c.open_hours)}</td>
       <td>${c.floors} 层</td>
       <td><button class="btn btn-ghost btn-sm" onclick='editCanteen(${JSON.stringify(c).replace(/'/g, "&#39;")})'>编辑</button>
           <button class="btn btn-danger btn-sm" onclick="delCanteen('${c.id}')">删除</button></td>
-    </tr>`).join('');
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">暂无数据</td></tr>';
 }
 function editCanteen(c) {
   editTarget = { type: 'canteen', id: c.id };
+  document.getElementById('cSchool').value = c.school_id || '';
   document.getElementById('cName').value = c.name;
   document.getElementById('cLoc').value = c.location;
   document.getElementById('cHours').value = c.open_hours;
@@ -284,17 +479,19 @@ function editCanteen(c) {
 }
 async function saveCanteen() {
   const body = {
+    schoolId: document.getElementById('cSchool').value,
     name: document.getElementById('cName').value.trim(),
     location: document.getElementById('cLoc').value.trim(),
     openHours: document.getElementById('cHours').value.trim(),
     floors: parseInt(document.getElementById('cFloors').value) || 1
   };
   if (!body.name) return toast('名称不能为空');
+  if (!body.schoolId) return toast('请选择所属学校');
   try {
     if (editTarget && editTarget.type === 'canteen') { await api('/admin/canteens/' + editTarget.id, 'PUT', body); editTarget = null; }
     else { await api('/admin/canteens', 'POST', body); }
     ['cName','cLoc','cHours','cFloors'].forEach((id) => document.getElementById(id).value = '');
-    await loadCanteens(); await loadStalls(); await loadDishes();
+    await loadSchools(); await loadCanteens(); await loadStalls(); await loadDishes();
     toast('已保存');
   } catch (e) { toast(e.message); }
 }
@@ -307,22 +504,37 @@ async function delCanteen(id) {
 async function fillCanteenSelect(selId, keep) {
   const canteens = await api('/admin/canteens');
   const sel = document.getElementById(selId);
-  sel.innerHTML = canteens.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  // 标注学校名，避免多校同名食堂（如多个「第一食堂」）选错归属
+  sel.innerHTML = canteens.map((c) => `<option value="${c.id}">${esc((c.school_name ? c.school_name + ' · ' : '') + c.name)}</option>`).join('');
   if (keep) sel.value = keep;
   return canteens;
 }
 async function loadStalls() {
   await fillCanteenSelect('sCanteen');
-  const stalls = await api('/admin/stalls');
+  const s = pageState.stalls;
+  const schoolId = document.getElementById('stallSchoolFilter').value;
+  const qs = ['page=' + s.page, 'pageSize=' + s.size];
+  if (schoolId) qs.push('schoolId=' + encodeURIComponent(schoolId));
+  const data = await api('/admin/stalls?' + qs.join('&'));
+  // 删除后页码可能越界，回退到最后一页重取
+  if (data.list.length === 0 && s.page > 1 && data.total > 0) {
+    s.page = Math.max(1, Math.ceil(data.total / s.size));
+    return loadStalls();
+  }
+  s.total = data.total;
   const canteens = await api('/admin/canteens');
-  const nameOf = (id) => (canteens.find((c) => c.id === id) || {}).name || '-';
-  document.getElementById('stallList').innerHTML = stalls.map((s) => `
+  const cNameOf = (id) => (canteens.find((c) => c.id === id) || {}).name || '-';
+  const rows = data.list.map((st) => `
     <tr>
-      <td>${esc(nameOf(s.canteen_id))}</td><td><strong>${esc(s.name)}</strong></td>
-      <td>${s.floor} 层</td><td>${esc(s.cuisine)}</td>
-      <td><button class="btn btn-ghost btn-sm" onclick='editStall(${JSON.stringify(s).replace(/'/g, "&#39;")})'>编辑</button>
-          <button class="btn btn-danger btn-sm" onclick="delStall('${s.id}')">删除</button></td>
+      <td class="muted">${esc(st.school_name || '—')}</td>
+      <td>${esc(cNameOf(st.canteen_id))}</td>
+      <td><strong>${esc(st.name)}</strong></td>
+      <td>${st.floor} 层</td><td>${esc(st.cuisine)}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick='editStall(${JSON.stringify(st).replace(/'/g, "&#39;")})'>编辑</button>
+          <button class="btn btn-danger btn-sm" onclick="delStall('${st.id}')">删除</button></td>
     </tr>`).join('');
+  document.getElementById('stallList').innerHTML = rows || '<tr><td colspan="6" class="muted">暂无数据</td></tr>';
+  renderPager('stalls');
 }
 function editStall(s) {
   editTarget = { type: 'stall', id: s.id };
@@ -357,17 +569,26 @@ async function delStall(id) {
 async function fillStallSelect() {
   const cid = document.getElementById('dCanteen').value;
   if (!cid) return;
-  const stalls = await api('/admin/stalls?canteenId=' + cid);
-  document.getElementById('dStall').innerHTML = stalls.map((s) => `<option value="${s.id}">${esc(s.name)}（${s.floor} 层）</option>`).join('');
+  const data = await api('/admin/stalls?canteenId=' + encodeURIComponent(cid) + '&pageSize=200');
+  document.getElementById('dStall').innerHTML = (data.list || []).map((s) => `<option value="${s.id}">${esc(s.name)}（${s.floor} 层）</option>`).join('');
 }
 async function loadDishes() {
-  const canteens = await fillCanteenSelect('dCanteen');
+  await fillCanteenSelect('dCanteen');
   await fillStallSelect();
-  const dishes = await api('/admin/dishes');
-  const cNameOf = (id) => (canteens.find((c) => c.id === id) || {}).name || '-';
-  document.getElementById('dishList').innerHTML = dishes.map((d) => `
+  const s = pageState.dishes;
+  const schoolId = document.getElementById('dishSchoolFilter').value;
+  const qs = ['page=' + s.page, 'pageSize=' + s.size];
+  if (schoolId) qs.push('schoolId=' + encodeURIComponent(schoolId));
+  const data = await api('/admin/dishes?' + qs.join('&'));
+  if (data.list.length === 0 && s.page > 1 && data.total > 0) {
+    s.page = Math.max(1, Math.ceil(data.total / s.size));
+    return loadDishes();
+  }
+  s.total = data.total;
+  const rows = data.list.map((d) => `
     <tr>
       <td><img class="thumb" src="${esc(d.image)}" onerror="this.style.visibility='hidden'"></td>
+      <td class="muted">${esc(d.schoolName || '—')}</td>
       <td><strong>${esc(d.name)}</strong> ${d.isSignature ? '<span class="tag">招牌</span>' : ''}</td>
       <td>${esc(d.canteenName)} / ${esc(d.stallName)}</td>
       <td>¥${d.price.toFixed(1)}</td>
@@ -380,6 +601,8 @@ async function loadDishes() {
         <button class="btn btn-danger btn-sm" onclick="delDish('${d.id}')">删除</button>
       </td>
     </tr>`).join('');
+  document.getElementById('dishList').innerHTML = rows || '<tr><td colspan="9" class="muted">暂无数据</td></tr>';
+  renderPager('dishes');
 }
 function editDish(d) {
   editTarget = { type: 'dish', id: d.id };
@@ -450,22 +673,69 @@ function statusBadge(s) {
   return '<span class="muted">—</span>';
 }
 async function loadReviews() {
+  const s = pageState.reviews;
   const status = document.getElementById('reviewStatusFilter').value;
-  const list = await api('/admin/reviews' + (status ? '?status=' + status : ''));
-  const rows = list.map((r) => `
+  const schoolId = document.getElementById('reviewSchoolFilter').value;
+  const keyword = document.getElementById('reviewKeyword').value.trim();
+  const qs = ['page=' + s.page, 'pageSize=' + s.size];
+  if (status) qs.push('status=' + encodeURIComponent(status));
+  if (schoolId) qs.push('schoolId=' + encodeURIComponent(schoolId));
+  if (keyword) qs.push('keyword=' + encodeURIComponent(keyword));
+  const data = await api('/admin/reviews?' + qs.join('&'));
+  if (data.list.length === 0 && s.page > 1 && data.total > 0) {
+    s.page = Math.max(1, Math.ceil(data.total / s.size));
+    return loadReviews();
+  }
+  s.total = data.total;
+  const rows = data.list.map((r) => `
     <tr>
+      <td><input type="checkbox" class="rowchk" value="${r.id}" onclick="updateBatchCount()"></td>
+      <td class="muted">${esc(r.schoolName || '—')}</td>
       <td>${esc(r.dishName)}</td><td>${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</td>
       <td>${esc(r.content)}${r.status === 'rejected' && r.rejectReason ? `<div class="muted">驳回原因：${esc(r.rejectReason)}</div>` : ''}</td>
       <td>👍 ${r.likes}</td>
-      <td>${statusBadge(r.status)}</td>
+      <td>${statusBadge(r.status)}${r.status === 'rejected' && r.moderationRule ? '<div class="muted">自动驳回</div>' : ''}</td>
       <td class="muted">${new Date(r.createTime).toLocaleString()}</td>
       <td>
         ${r.status !== 'approved' ? `<button class="btn btn-ghost btn-sm" onclick="setReviewStatus('${r.id}','approved')">通过</button>` : ''}
         ${r.status !== 'rejected' ? `<input id="rsn-${r.id}" placeholder="驳回原因" style="border:1px solid #d5ddd9; border-radius:6px; padding:4px 8px; font-size:12px; width:110px; margin:0 4px;">
           <button class="btn btn-danger btn-sm" onclick="rejectReview('${r.id}')">拒绝</button>` : ''}
+        <button class="btn btn-danger btn-sm" onclick="delReview('${r.id}')">删除</button>
       </td>
     </tr>`).join('');
-  document.getElementById('reviewList').innerHTML = rows || '<tr><td colspan="7" class="muted">暂无数据</td></tr>';
+  document.getElementById('reviewList').innerHTML = rows || '<tr><td colspan="9" class="muted">暂无数据</td></tr>';
+  document.getElementById('batchAll').checked = false;
+  updateBatchCount();
+  renderPager('reviews');
+}
+function selectedReviewIds() {
+  return Array.from(document.querySelectorAll('#reviewList input.rowchk:checked')).map((el) => el.value);
+}
+function updateBatchCount() {
+  document.getElementById('batchCount').textContent = '已选 ' + selectedReviewIds().length + ' 条';
+}
+function toggleAllReviews(checked) {
+  document.querySelectorAll('#reviewList input.rowchk').forEach((el) => { el.checked = checked; });
+  updateBatchCount();
+}
+async function batchReview(status) {
+  const ids = selectedReviewIds();
+  if (!ids.length) return toast('请先勾选要操作的评价');
+  const rejectReason = document.getElementById('batchReason').value.trim();
+  const tip = status === 'approved'
+    ? `确定批量通过选中的 ${ids.length} 条评价？通过后将对所有用户公开。`
+    : `确定批量驳回选中的 ${ids.length} 条评价？`;
+  if (!confirm(tip)) return;
+  try {
+    const r = await api('/admin/reviews/batch-status', 'POST', { ids, status, rejectReason });
+    document.getElementById('batchReason').value = '';
+    await loadReviews();
+    toast('已处理 ' + r.updated + ' 条');
+  } catch (e) { toast(e.message); }
+}
+async function delReview(id) {
+  if (!confirm('删除后该评价立即下架且不可恢复（关联举报记录保留为处理留痕），确定？')) return;
+  try { await api('/admin/reviews/' + id, 'DELETE'); await loadReviews(); toast('已删除'); } catch (e) { toast(e.message); }
 }
 async function setReviewStatus(id, status) {
   try { await api('/admin/reviews/' + id + '/status', 'PUT', { status }); await loadReviews(); toast('已更新'); } catch (e) { toast(e.message); }
@@ -481,10 +751,21 @@ async function rejectReview(id) {
 
 // 举报处理
 async function loadReports() {
+  const s = pageState.reports;
   const status = document.getElementById('reportStatusFilter').value;
-  const list = await api('/admin/reports' + (status ? '?status=' + status : ''));
-  const rows = list.map((p) => `
+  const schoolId = document.getElementById('reportSchoolFilter').value;
+  const qs = ['page=' + s.page, 'pageSize=' + s.size];
+  if (status) qs.push('status=' + encodeURIComponent(status));
+  if (schoolId) qs.push('schoolId=' + encodeURIComponent(schoolId));
+  const data = await api('/admin/reports?' + qs.join('&'));
+  if (data.list.length === 0 && s.page > 1 && data.total > 0) {
+    s.page = Math.max(1, Math.ceil(data.total / s.size));
+    return loadReports();
+  }
+  s.total = data.total;
+  const rows = data.list.map((p) => `
     <tr>
+      <td class="muted">${esc(p.schoolName || '—')}</td>
       <td>${esc(p.dishName)}</td>
       <td>${esc(p.reviewContent)}</td>
       <td>${esc(p.reason)}${p.detail ? `<div class="muted">${esc(p.detail)}</div>` : ''}</td>
@@ -498,7 +779,8 @@ async function loadReports() {
           <button class="btn btn-ghost btn-sm" onclick="handleReport('${p.id}','handled','')">仅标记处理</button>` : '<span class="muted">—</span>'}
       </td>
     </tr>`).join('');
-  document.getElementById('reportList').innerHTML = rows || '<tr><td colspan="7" class="muted">暂无数据</td></tr>';
+  document.getElementById('reportList').innerHTML = rows || '<tr><td colspan="8" class="muted">暂无数据</td></tr>';
+  renderPager('reports');
 }
 function reviewStatusText(s) {
   return s === 'approved' ? '已通过' : s === 'rejected' ? '已拒绝' : s === 'pending' ? '待审核' : '—';

@@ -1,6 +1,7 @@
 import { HttpClient } from './HttpClient';
 import { AppConfig } from '../config/AppConfig';
 import { User } from '../model/User';
+import { School } from '../model/School';
 import { Canteen, Stall } from '../model/Canteen';
 import { Dish, MealType } from '../model/Dish';
 import { MyReviewItem, Review, ReviewPage, ReviewSortType, WriteReviewParam } from '../model/Review';
@@ -19,6 +20,19 @@ export class Api {
   static async getCanteenList(): Promise<Canteen[]> {
     if (AppConfig.USE_MOCK) return MockData.getCanteenList();
     return Api.client.get<Canteen[]>('/canteens');
+  }
+
+  /** 学校名单（App 端按中文/全拼/首字母本地检索） */
+  static async getSchools(): Promise<School[]> {
+    return Api.client.get<School[]>('/schools');
+  }
+
+  /** 选择 / 切换学校（游客也可调用），成功后同步用户态供各页响应式读取 */
+  static async setUserSchool(schoolId: string): Promise<User> {
+    const body: Record<string, string> = { 'schoolId': schoolId };
+    const user = await Api.client.put<User>('/user/school', body);
+    Api.syncUserState(user);
+    return user;
   }
 
   static async getStallList(canteenId: string): Promise<Stall[]> {
@@ -135,6 +149,8 @@ export class Api {
   /** 同步用户态到 AppStorage（isGuest / localUser），供各页面响应式判断游客权限 */
   private static syncUserState(user: User): void {
     AppStorage.setOrCreate<boolean>('isGuest', user.username === '');
+    AppStorage.setOrCreate<string>('schoolId', user.schoolId || '');
+    AppStorage.setOrCreate<string>('schoolName', user.schoolName || '');
     AppStorage.setOrCreate<Object>('localUser', user);
     PreferencesUtil.saveUser(user);
   }

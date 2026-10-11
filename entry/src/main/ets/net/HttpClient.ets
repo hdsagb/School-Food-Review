@@ -122,6 +122,11 @@ export class HttpClient {
     return this.request<T>({ url, method: HttpMethod.POST, body });
   }
 
+  /** PUT 便捷方法 */
+  put<T>(url: string, body?: Object): Promise<T> {
+    return this.request<T>({ url, method: HttpMethod.PUT, body });
+  }
+
   /**
    * 上传图片（multipart/form-data），返回可访问的图片 URL
    * @param path 本地文件路径（photoUri）

@@ -4,8 +4,9 @@
  */
 const express = require('express');
 const db = require('../db');
-const { parseBearer, genToken, guestAuth, registeredAuth, hashPassword, verifyPassword } = require('../auth');
+const { parseBearer, genToken, guestAuth, registeredAuth, optionalGuest, hashPassword, verifyPassword } = require('../auth');
 const { rateLimit } = require('../rateLimit');
+const { auditReview } = require('../moderation');
 
 const router = express.Router();
 
@@ -50,20 +51,9 @@ function countReviewsSince(userId, sinceIso) {
     .get(userId, sinceIso).n;
 }
 
-/** 命中敏感词则返回第一个命中的词，未命中返回空串 */
-function firstBannedWord(text) {
-  const src = String(text || '');
-  if (!src) return '';
-  const rows = db.prepare('SELECT word FROM banned_words').all();
-  for (const r of rows) {
-    if (r.word && src.includes(r.word)) return r.word;
-  }
-  return '';
-}
-
-/** 菜品查询公共 SQL（联表取档口/食堂名与楼层） */
+/** 菜品查询公共 SQL（联表取档口/食堂名、楼层与所属学校，供按校隔离校验） */
 const DISH_SELECT = `
-  SELECT d.*, s.name AS stall_name, s.floor AS floor, c.name AS canteen_name
+  SELECT d.*, s.name AS stall_name, s.floor AS floor, c.name AS canteen_name, c.school_id AS school_id
   FROM dishes d
   JOIN stalls s ON d.stall_id = s.id
   JOIN canteens c ON d.canteen_id = c.id
@@ -122,24 +112,96 @@ function reviewRowToModel(r) {
   };
 }
 
-function favoritesOf(userId) {
-  return db.prepare('SELECT dish_id FROM user_favorites WHERE user_id = ? ORDER BY rowid')
-    .all(userId).map((x) => x.dish_id);
+/**
+ * 某用户的收藏菜品 id 列表
+ * 传入 schoolId 时只返回「该学校」的收藏：切换学校后其他学校的收藏被隐藏（记录仍保留），切回原校时重新出现
+ */
+function favoritesOf(userId, schoolId) {
+  if (schoolId === undefined) {
+    return db.prepare('SELECT dish_id FROM user_favorites WHERE user_id = ? ORDER BY rowid')
+      .all(userId).map((x) => x.dish_id);
+  }
+  return db.prepare(`
+    SELECT f.dish_id FROM user_favorites f
+    JOIN dishes d ON d.id = f.dish_id
+    JOIN canteens c ON c.id = d.canteen_id
+    WHERE f.user_id = ? AND c.school_id = ?
+    ORDER BY f.rowid
+  `).all(userId, schoolId).map((x) => x.dish_id);
+}
+
+// ---------- 学校隔离 ----------
+
+/** 当前请求者所在学校 id（无 token / 未选校返回空串） */
+function schoolOf(req) {
+  return (req.user && req.user.school_id) || '';
+}
+
+/** 内容是否属于请求者所在学校：未选校时一律不可见，避免跨校串数据 */
+function isOwnSchool(req, schoolId) {
+  const sid = schoolOf(req);
+  return !!sid && sid === schoolId;
+}
+
+/** 取菜品所属学校 id（不存在返回 undefined） */
+function dishSchoolId(dishId) {
+  const row = db.prepare(
+    'SELECT c.school_id AS school_id FROM dishes d JOIN canteens c ON d.canteen_id = c.id WHERE d.id = ?'
+  ).get(dishId);
+  return row ? row.school_id : undefined;
+}
+
+/** 取食堂所属学校 id（不存在返回 undefined） */
+function canteenSchoolId(canteenId) {
+  const row = db.prepare('SELECT school_id FROM canteens WHERE id = ?').get(canteenId);
+  return row ? row.school_id : undefined;
 }
 
 // ---------- 公共数据 ----------
 
-// GET /api/canteens
-router.get('/canteens', (req, res) => {
-  const rows = db.prepare('SELECT * FROM canteens ORDER BY id').all();
+/** 学校查询与映射（App 端按中文/全拼/首字母本地检索，服务端只负责下发全量名单） */
+function schoolRowToModel(s) {
+  return {
+    id: s.id,
+    name: s.name,
+    level: s.level || '本科',
+    city: s.city || '上海',
+    pinyinFull: s.pinyin_full || '',
+    pinyinInitials: s.pinyin_initials || ''
+  };
+}
+
+/** 按 id 取学校名（用于个人资料回显），不存在返回空串 */
+function schoolNameOf(schoolId) {
+  if (!schoolId) return '';
+  const row = db.prepare('SELECT name FROM schools WHERE id = ?').get(schoolId);
+  return row ? row.name : '';
+}
+
+// GET /api/schools 学校名单（本科在前，同层次按 id 稳定排序；含临时测试学校供联调，上线前删除）
+router.get('/schools', (req, res) => {
+  const rows = db.prepare(
+    "SELECT * FROM schools ORDER BY CASE level WHEN '本科' THEN 0 ELSE 1 END, id"
+  ).all();
+  ok(res, rows.map(schoolRowToModel));
+});
+
+// GET /api/canteens 当前用户所在学校的食堂（未选校返回空列表）
+router.get('/canteens', optionalGuest, (req, res) => {
+  const sid = schoolOf(req);
+  if (!sid) return ok(res, []);
+  const rows = db.prepare('SELECT * FROM canteens WHERE school_id = ? ORDER BY id').all(sid);
   ok(res, rows.map((c) => ({
     id: c.id, name: c.name, location: c.location,
     openHours: c.open_hours, floors: c.floors, image: c.image
   })));
 });
 
-// GET /api/canteens/:canteenId/stalls
-router.get('/canteens/:canteenId/stalls', (req, res) => {
+// GET /api/canteens/:canteenId/stalls 仅限本校食堂
+router.get('/canteens/:canteenId/stalls', optionalGuest, (req, res) => {
+  if (!isOwnSchool(req, canteenSchoolId(req.params.canteenId))) {
+    return fail(res, 404, '食堂不存在');
+  }
   const rows = db.prepare('SELECT * FROM stalls WHERE canteen_id = ? ORDER BY id').all(req.params.canteenId);
   ok(res, rows.map((s) => ({
     id: s.id, canteenId: s.canteen_id, name: s.name,
@@ -147,35 +209,41 @@ router.get('/canteens/:canteenId/stalls', (req, res) => {
   })));
 });
 
-// GET /api/menu/today?canteenId=&mealType=
-router.get('/menu/today', (req, res) => {
-  let rows = db.prepare(`${DISH_SELECT} WHERE d.canteen_id = ? ORDER BY d.id`).all(req.query.canteenId || '');
+// GET /api/menu/today?canteenId=&mealType= 仅限本校食堂
+router.get('/menu/today', optionalGuest, (req, res) => {
+  const canteenId = req.query.canteenId || '';
+  if (!isOwnSchool(req, canteenSchoolId(canteenId))) return ok(res, []);
+  let rows = db.prepare(`${DISH_SELECT} WHERE d.canteen_id = ? ORDER BY d.id`).all(canteenId);
   if (req.query.mealType === 'breakfast') rows = rows.slice(0, 2);
   ok(res, rows.map(dishRowToModel));
 });
 
-// GET /api/dishes/search?keyword=
-router.get('/dishes/search', (req, res) => {
+// GET /api/dishes/search?keyword= 仅在本校菜品内检索
+router.get('/dishes/search', optionalGuest, (req, res) => {
+  const sid = schoolOf(req);
+  if (!sid) return ok(res, []);
   const kw = (req.query.keyword || '').trim();
   let rows;
   if (!kw) {
-    rows = db.prepare(`${DISH_SELECT} ORDER BY d.id`).all();
+    rows = db.prepare(`${DISH_SELECT} WHERE c.school_id = ? ORDER BY d.id`).all(sid);
   } else {
     const like = `%${kw}%`;
-    rows = db.prepare(`${DISH_SELECT} WHERE d.name LIKE ? OR d.tags LIKE ? ORDER BY d.id`).all(like, like);
+    rows = db.prepare(`${DISH_SELECT} WHERE c.school_id = ? AND (d.name LIKE ? OR d.tags LIKE ?) ORDER BY d.id`)
+      .all(sid, like, like);
   }
   ok(res, rows.map(dishRowToModel));
 });
 
-// GET /api/dishes/:dishId
-router.get('/dishes/:dishId', (req, res) => {
+// GET /api/dishes/:dishId 仅限本校菜品
+router.get('/dishes/:dishId', optionalGuest, (req, res) => {
   const d = db.prepare(`${DISH_SELECT} WHERE d.id = ?`).get(req.params.dishId);
-  if (!d) return fail(res, 404, '菜品不存在');
+  if (!d || !isOwnSchool(req, d.school_id)) return fail(res, 404, '菜品不存在');
   ok(res, dishRowToModel(d));
 });
 
-// GET /api/dishes/:dishId/reviews?page=&pageSize=&sort=
-router.get('/dishes/:dishId/reviews', (req, res) => {
+// GET /api/dishes/:dishId/reviews?page=&pageSize=&sort= 仅限本校菜品
+router.get('/dishes/:dishId/reviews', optionalGuest, (req, res) => {
+  if (!isOwnSchool(req, dishSchoolId(req.params.dishId))) return fail(res, 404, '菜品不存在');
   const page = Math.max(1, parseInt(req.query.page || '1', 10));
   const pageSize = Math.max(1, parseInt(req.query.pageSize || '8', 10));
   const sort = req.query.sort === 'hottest' ? 'hottest' : 'latest';
@@ -191,7 +259,8 @@ router.get('/dishes/:dishId/reviews', (req, res) => {
 router.post('/reviews', registeredAuth, rateLimit({ windowMs: 10 * 60 * 1000, max: 10, scope: 'review', keyOf: (req) => req.user.id }), (req, res) => {
   const { dishId, rating, dimensions, content, images, isAnonymous } = req.body || {};
   if (!dishId || typeof rating !== 'number' || !content) return fail(res, 400, '参数不完整');
-  if (!db.prepare('SELECT id FROM dishes WHERE id = ?').get(dishId)) return fail(res, 404, '菜品不存在');
+  // 只能评价本校菜品，防止跨校提交
+  if (!isOwnSchool(req, dishSchoolId(dishId))) return fail(res, 404, '菜品不存在');
 
   // 每个账号的评价频率限制（每日 / 每月上限由管理后台配置）
   const limits = reviewLimits();
@@ -202,22 +271,24 @@ router.post('/reviews', registeredAuth, rateLimit({ windowMs: 10 * 60 * 1000, ma
     return fail(res, 429, `本月评价已达上限（${limits.monthly} 条），下个月再来吧`);
   }
 
-  // 先审后发：命中敏感词直接驳回并给出原因，其余进入待审核；审核通过后才对外可见
-  const hitWord = firstBannedWord(content);
-  const status = hitWord ? 'rejected' : 'pending';
-  const rejectReason = hitWord ? `包含敏感词「${hitWord}」` : '';
+  // L1 自动审核：命中规则直接驳回并返回原因，其余进入待审核；审核通过后才对外可见
+  const verdict = auditReview({ userId: req.user.id, dishId, content });
+  const status = verdict.reject ? 'rejected' : 'pending';
+  const rejectReason = verdict.reason;
+  // 记录命中的规则名，管理后台据此区分「自动驳回 / 人工驳回」
+  const moderationRule = verdict.rule;
 
   const id = 'r' + Date.now() + Math.floor(Math.random() * 1000);
   const createTime = new Date().toISOString();
   const dim = dimensions || {};
   db.prepare(`
     INSERT INTO reviews (id, dish_id, user_id, rating, taste, portion, value, content, images,
-                         likes, is_anonymous, status, reject_reason, create_time)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+                         likes, is_anonymous, status, reject_reason, moderation_rule, create_time)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
   `).run(
     id, dishId, req.user.id, rating,
     dim.taste || rating, dim.portion || rating, dim.value || rating,
-    content, JSON.stringify(images || []), isAnonymous ? 1 : 0, status, rejectReason, createTime
+    content, JSON.stringify(images || []), isAnonymous ? 1 : 0, status, rejectReason, moderationRule, createTime
   );
 
   // 待审/驳回的评价不计入菜品统计，重算后数值保持不变
@@ -288,7 +359,9 @@ router.get('/user/profile', (req, res) => {
     nickname: user.nickname,
     avatar: user.avatar || '',
     username: user.username || '',
-    favorites: favoritesOf(user.id)
+    schoolId: user.school_id || '',
+    schoolName: schoolNameOf(user.school_id),
+    favorites: favoritesOf(user.id, user.school_id || '')
   });
 });
 
@@ -304,15 +377,19 @@ router.get('/user/reviews', guestAuth, (req, res) => {
   ok(res, rows.map((r) => ({ review: reviewRowToModel(r), dishName: r.dish_name || '未知菜品' })));
 });
 
-// GET /api/user/favorites
+// GET /api/user/favorites 当前学校的收藏菜品 id（用于红心状态，切换学校后隐藏他校收藏）
 router.get('/user/favorites', guestAuth, (req, res) => {
-  ok(res, favoritesOf(req.user.id));
+  ok(res, favoritesOf(req.user.id, req.user.school_id || ''));
 });
 
-// GET /api/user/favorites/dishes
+// GET /api/user/favorites/dishes 仅返回「当前学校」的收藏菜品
+// 切校后其他学校的收藏被隐藏（记录仍保留），切回原校时重新出现
 router.get('/user/favorites/dishes', guestAuth, (req, res) => {
-  const rows = db.prepare(`${DISH_SELECT} JOIN user_favorites f ON d.id = f.dish_id WHERE f.user_id = ? ORDER BY f.rowid`)
-    .all(req.user.id);
+  const sid = req.user.school_id || '';
+  if (!sid) return ok(res, []);
+  const rows = db.prepare(
+    `${DISH_SELECT} JOIN user_favorites f ON d.id = f.dish_id WHERE f.user_id = ? AND c.school_id = ? ORDER BY f.rowid`
+  ).all(req.user.id, sid);
   ok(res, rows.map(dishRowToModel));
 });
 
@@ -326,7 +403,18 @@ router.post('/user/favorites', registeredAuth, (req, res) => {
   } else {
     db.prepare('INSERT INTO user_favorites (user_id, dish_id) VALUES (?, ?)').run(req.user.id, dishId);
   }
-  ok(res, favoritesOf(req.user.id));
+  ok(res, favoritesOf(req.user.id, req.user.school_id || ''));
+});
+
+// PUT /api/user/school { schoolId } 选择 / 切换学校
+// 游客也可设置：学校在注册前（首次打开应用）收集，因此不能要求已注册
+router.put('/user/school', guestAuth, (req, res) => {
+  const { schoolId } = req.body || {};
+  const sid = String(schoolId || '').trim();
+  if (!sid) return fail(res, 400, '请选择学校');
+  if (!db.prepare('SELECT id FROM schools WHERE id = ?').get(sid)) return fail(res, 404, '学校不存在');
+  db.prepare('UPDATE users SET school_id = ? WHERE id = ?').run(sid, req.user.id);
+  ok(res, userPayload(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)));
 });
 
 // POST /api/user/delete { password } 注销账号（仅注册用户）
@@ -367,7 +455,9 @@ function userPayload(user) {
     nickname: user.nickname,
     avatar: user.avatar || '',
     username: user.username || '',
-    favorites: favoritesOf(user.id)
+    schoolId: user.school_id || '',
+    schoolName: schoolNameOf(user.school_id),
+    favorites: favoritesOf(user.id, user.school_id || '')
   };
 }
 

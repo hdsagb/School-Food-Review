@@ -15,6 +15,7 @@ export struct ProfilePage {
   @StorageLink('myReviewCount') myReviewCount: number = 0;
   @StorageLink('favorites') favorites: string[] = [];
   @StorageLink('isGuest') isGuest: boolean = true;
+  @StorageLink('schoolName') schoolName: string = '';
 
   async aboutToAppear(): Promise<void> {
     if (AppConfig.USE_MOCK) {
@@ -40,6 +41,7 @@ export struct ProfilePage {
     this.nickname = this.user ? this.user.nickname : '';
     this.darkMode = await PreferencesUtil.getDarkMode();
     this.refreshCounts();
+    this.refreshFavorites();
   }
 
   /** 触发评价同步；计数/列表经 AppStorage 自动刷新 */
@@ -48,6 +50,15 @@ export struct ProfilePage {
       await Api.getMyReviews();
     } catch (e) {
       console.error('loadProfileCounts error: ' + (e as Error).message);
+    }
+  }
+
+  /** 触发收藏同步；切校后收藏数经 AppStorage 自动刷新（仅统计当前学校的收藏） */
+  private async refreshFavorites(): Promise<void> {
+    try {
+      await Api.getFavorites();
+    } catch (e) {
+      console.error('loadProfileFavorites error: ' + (e as Error).message);
     }
   }
 
@@ -107,6 +118,7 @@ export struct ProfilePage {
       .borderRadius($r('app.float.corner_card'))
       .shadow({ radius: 10, color: 'rgba(28,59,48,0.06)', offsetX: 0, offsetY: 3 })
 
+      this.MenuItem('🏫 我的学校', this.schoolName || '未选择', (): void => { this.goSchoolPicker(); })
       if (this.isGuest) {
         this.MenuItem('🔐 登录 / 注册', '', (): void => { this.goLogin(); })
       } else {
@@ -117,6 +129,7 @@ export struct ProfilePage {
       this.MenuItem('⭐ 我的收藏', `${this.favorites.length} 道`, (): void => { this.goFavorites(); })
       this.MenuItem('🧹 清除缓存', '', (): void => { this.clearCache(); })
       this.DarkModeRow()
+      this.MenuItem('📋 用户协议', '', (): void => { this.goAgreement(); })
       this.MenuItem('📋 隐私声明', '', (): void => { this.goPrivacy(); })
       this.MenuItem('🌿 关于校园食评', `v${AppConfig.APP_VERSION}`, (): void => { this.goAbout(); })
     }
@@ -137,6 +150,7 @@ export struct ProfilePage {
         this.nickname = this.user.nickname;
       }
       this.refreshCounts();
+      this.refreshFavorites();
     })
   }
 
@@ -199,6 +213,10 @@ export struct ProfilePage {
     }
   }
 
+  private goAgreement(): void {
+    this.pathStack.pushPathByName('Agreement', '');
+  }
+
   private goPrivacy(): void {
     this.pathStack.pushPathByName('Privacy', '');
   }
@@ -247,6 +265,11 @@ export struct ProfilePage {
 
   private goFavorites(): void {
     this.pathStack.pushPathByName('Favorites', '');
+  }
+
+  /** 进入学校选择页修改当前学校（首次选校也可从此进入） */
+  private goSchoolPicker(): void {
+    this.pathStack.pushPathByName('SchoolPicker', '');
   }
 
   private goMyReviews(): void {

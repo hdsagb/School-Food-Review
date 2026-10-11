@@ -15,9 +15,11 @@ import { ProfilePage } from './ProfilePage';
 import { MyReviewsPage } from './MyReviewsPage';
 import { FavoritesPage } from './FavoritesPage';
 import { PrivacyPage } from './PrivacyPage';
+import { UserAgreementPage } from './UserAgreementPage';
 import { AboutPage } from './AboutPage';
 import { LoginPage } from './LoginPage';
 import { DeleteAccountPage } from './DeleteAccountPage';
+import { SchoolPickerPage } from './SchoolPickerPage';
 
 /** 菜单缓存结构（离线兜底） */
 interface MenuCache {
@@ -41,10 +43,15 @@ struct Index {
   @StorageLink('favorites') favorites: string[] = [];
   @StorageLink('darkMode') darkMode: boolean = false;
   @StorageLink('isGuest') isGuest: boolean = true;
+  // 学校维度：schoolId 为空即「未选校」，主页只展示引导态；变更时（首次选校/后续改校）自动重载数据
+  @StorageLink('schoolId') @Watch('onSchoolChanged') schoolId: string = '';
+  @StorageLink('schoolName') schoolName: string = '';
   @State searchKeyword: string = '';
   @State searchHistory: string[] = [];
   @State stalls: Stall[] = [];
   @State currentStallId: string = '';
+  /** 已加载内容的学校 id，避免 @Watch 与 loadAll 重复请求同一所学校 */
+  private loadedSchoolId: string = '';
 
   private meals: MealType[] = [MealType.BREAKFAST, MealType.LUNCH, MealType.DINNER];
   private mealLabels: string[] = ['早餐', '午餐', '晚餐'];
@@ -67,19 +74,57 @@ struct Index {
     await this.loadAll();
   }
 
-  /** 加载首页全部数据（隐私同意后调用） */
+  /** 加载首页数据：先取用户资料（含学校），未选校时主页只保留引导态，不加载任何内容 */
   private async loadAll(): Promise<void> {
+    // 初始化用户态（isGuest/localUser/schoolId/schoolName 经 AppStorage 响应式共享）
+    try {
+      await Api.getLocalUser();
+    } catch (e) {
+      // 资料拉取失败时不伪装成「未选校」引导态，显式展示错误态与重试
+      this.error = (e as Error).message || '网络请求失败，请检查网络后重试';
+      this.loading = false;
+      return;
+    }
+    if (!this.schoolId) {
+      this.loading = false;
+      return;
+    }
+    await this.loadSchoolContent();
+  }
+
+  /** 加载当前所选学校的内容（食堂 / 档口 / 菜品 / 收藏 / 搜索历史） */
+  private async loadSchoolContent(): Promise<void> {
+    if (!this.schoolId || this.loadedSchoolId === this.schoolId) return;
+    this.loadedSchoolId = this.schoolId;
+    this.error = '';
+    this.loading = true;
+    this.canteens = [];
+    this.stalls = [];
+    this.dishes = [];
     await this.loadCanteens();
     await this.loadStalls();
     await this.loadMenu();
     this.favorites = await Api.getFavorites();
     this.searchHistory = await PreferencesUtil.getSearchHistory();
-    // 初始化用户态（isGuest/localUser 经 AppStorage 响应式共享）
-    try {
-      await Api.getLocalUser();
-    } catch (e) {
-      console.error('getLocalUser error: ' + (e as Error).message);
+  }
+
+  /** 学校变更（首次选校 / 后续改校）后重载该校数据；清空选择时回到引导态 */
+  onSchoolChanged(): void {
+    if (this.loadedSchoolId === this.schoolId) return;
+    this.currentCanteenIdx = 0;
+    this.currentStallId = '';
+    this.searchKeyword = '';
+    this.stalls = [];
+    if (!this.schoolId) {
+      this.canteens = [];
+      this.dishes = [];
+      this.loadedSchoolId = '';
+      this.loading = false;
+      return;
     }
+    // 切校后旧收藏可能不属于新校，先清空再由接口回填（切回原校时会重新显示）
+    this.favorites = [];
+    this.loadSchoolContent();
   }
 
   /** 拦截返回键：隐私弹窗展示期间必须显式选择 */
@@ -106,6 +151,13 @@ struct Index {
 
   /** 页面重新显示时刷新收藏，保证从详情页返回后红心同步 */
   async onPageShow(): Promise<void> {
+    // 隐私未同意、或尚未选校时不发起内容请求
+    if (this.showPrivacySheet || !this.schoolId) return;
+    // 从选校页返回时学校可能已变化，重载该校内容；否则只同步收藏红心
+    if (this.loadedSchoolId !== this.schoolId) {
+      await this.loadSchoolContent();
+      return;
+    }
     this.favorites = await Api.getFavorites();
   }
 
@@ -120,11 +172,10 @@ struct Index {
 
   async loadMenu(): Promise<void> {
     if (this.canteens.length === 0) {
-      // 没有食堂数据就没有任何菜品可展示：显式置为错误态而非空态，避免把故障伪装成"菜单还没准备好"
+      // 本校暂无食堂：不是故障，交给「建设中」空态展示；
+      // 但若食堂列表本身加载失败（this.error 已有值），保留错误态，不被空态掩盖
+      this.dishes = [];
       this.loading = false;
-      if (!this.error) {
-        this.error = '食堂列表加载失败，请检查网络后重试';
-      }
       return;
     }
     this.loading = true;
@@ -228,6 +279,8 @@ struct Index {
   private retryAll(): void {
     this.error = '';
     this.loading = true;
+    // 清空已加载标记，绕过 loadSchoolContent 的去重，强制重新请求
+    this.loadedSchoolId = '';
     this.loadAll();
   }
 
@@ -241,44 +294,64 @@ struct Index {
       Stack() {
         Column() {
           this.HeaderBar()
-          this.CanteenChips()
-          this.MealChips()
-          this.StallChips()
-          this.SearchHistory()
 
-          if (this.loading) {
-            SkeletonList({ count: 4 })
+          if (this.schoolId) {
+            // 本校没有食堂时不渲染食堂/餐段/档口/搜索历史等控件，只保留空态提示
+            if (this.canteens.length > 0) {
+              this.CanteenChips()
+              this.MealChips()
+              this.StallChips()
+              this.SearchHistory()
+            }
+
+            if (this.loading) {
+              SkeletonList({ count: 4 })
+                .layoutWeight(1)
+            } else if (this.error) {
+              Column() {
+                StateView({ state: 'error', message: this.error, doRetry: (): void => { this.retryAll(); } })
+              }
               .layoutWeight(1)
+              .justifyContent(FlexAlign.Center)
+            } else if (this.dishes.length === 0) {
+              Column() {
+                StateView({
+                  state: 'empty',
+                  message: this.canteens.length === 0 ? '该校食堂数据正在建设中，敬请期待' : ''
+                })
+              }
+              .layoutWeight(1)
+              .justifyContent(FlexAlign.Center)
+            } else {
+              Refresh({ refreshing: $$this.loading }) {
+                List({ space: 10 }) {
+                  ForEach(this.dishes, (d: Dish) => {
+                    ListItem() {
+                      DishCard({
+                        dishData: d,
+                        isFavorite: this.favorites.includes(d.id),
+                        doTap: (): void => { this.goDetail(d.id); },
+                        doFavorite: (): void => { this.toggleFavorite(d.id); }
+                      })
+                    }
+                  }, (d: Dish) => d.id)
+                }
+                .width('100%')
+                .height('100%')
+                .padding({ left: 14, right: 14, top: 10, bottom: 14 })
+              }
+              .onRefreshing((): void => { this.loadMenu(); })
+              .layoutWeight(1)
+            }
           } else if (this.error) {
+            // 用户资料拉取失败：显式错误态 + 重试，不伪装成「未选校」引导
             Column() {
               StateView({ state: 'error', message: this.error, doRetry: (): void => { this.retryAll(); } })
             }
             .layoutWeight(1)
             .justifyContent(FlexAlign.Center)
-          } else if (this.dishes.length === 0) {
-            Column() { StateView({ state: 'empty' }) }
-              .layoutWeight(1)
-              .justifyContent(FlexAlign.Center)
           } else {
-            Refresh({ refreshing: $$this.loading }) {
-              List({ space: 10 }) {
-                ForEach(this.dishes, (d: Dish) => {
-                  ListItem() {
-                    DishCard({
-                      dishData: d,
-                      isFavorite: this.favorites.includes(d.id),
-                      doTap: (): void => { this.goDetail(d.id); },
-                      doFavorite: (): void => { this.toggleFavorite(d.id); }
-                    })
-                  }
-                }, (d: Dish) => d.id)
-              }
-              .width('100%')
-              .height('100%')
-              .padding({ left: 14, right: 14, top: 10, bottom: 14 })
-            }
-            .onRefreshing((): void => { this.loadMenu(); })
-            .layoutWeight(1)
+            this.NoSchoolGuide()
           }
 
           this.BottomBar()
@@ -298,6 +371,42 @@ struct Index {
     .mode(NavigationMode.Stack)
     .hideTitleBar(true)
     .navDestination(this.PagesMap)
+  }
+
+  /** 未选校引导态：主页不展示任何食堂 / 菜品内容，只能先去选择学校 */
+  @Builder NoSchoolGuide() {
+    Column({ space: 10 }) {
+      Text('🏫')
+        .fontSize(56)
+      Text('你还没有选择学校')
+        .fontSize($r('app.float.title_medium'))
+        .fontWeight(FontWeight.Medium)
+        .fontColor(ThemeUtil.textPrimary(this.darkMode))
+      Text('选择所在学校后，即可查看该校的食堂与菜品评价')
+        .fontSize($r('app.float.body_text'))
+        .fontColor(ThemeUtil.textSecondary(this.darkMode))
+        .textAlign(TextAlign.Center)
+        .padding({ left: 36, right: 36 })
+      Row({ space: 2 }) {
+        Text('去选择学校')
+          .fontSize($r('app.float.body_text'))
+          .fontColor(ThemeUtil.brandDeep(this.darkMode))
+          .decoration({ type: TextDecorationType.Underline, color: ThemeUtil.brandDeep(this.darkMode) })
+        Text('>')
+          .fontSize($r('app.float.body_text'))
+          .fontColor(ThemeUtil.brandDeep(this.darkMode))
+      }
+      .margin({ top: 8 })
+      .onClick((): void => { this.goSchoolPicker(); })
+
+      Text('不同学校的食堂与菜品数据相互独立')
+        .fontSize(10)
+        .fontColor(ThemeUtil.textHint(this.darkMode))
+        .margin({ top: 4 })
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .justifyContent(FlexAlign.Center)
   }
 
   @Builder PrivacyOverlay() {
@@ -325,16 +434,16 @@ struct Index {
         .width('100%')
 
       Column({ space: 8 }) {
-        Text('· 仅收集昵称、评价内容与图片等必要信息，用于提供菜品评价服务')
+        Text('· 仅收集昵称、评价内容、图片与点赞等必要信息，用于提供菜单浏览与评价服务')
           .fontSize($r('app.float.caption_text'))
           .fontColor(ThemeUtil.textSecondary(this.darkMode))
-        Text('· 你的评价与昵称将公开显示，不用于其他用途')
+        Text('· 评价经审核通过后公开显示，昵称可选择匿名')
           .fontSize($r('app.float.caption_text'))
           .fontColor(ThemeUtil.textSecondary(this.darkMode))
-        Text('· 相机/相册权限仅在发布评价配图时使用')
+        Text('· 选择评价图片时使用系统安全控件，无需额外相册权限')
           .fontSize($r('app.float.caption_text'))
           .fontColor(ThemeUtil.textSecondary(this.darkMode))
-        Text('· 可随时在「我的」页面删除自己发布的评价')
+        Text('· 可随时删除自己发布的评价，或注销账号')
           .fontSize($r('app.float.caption_text'))
           .fontColor(ThemeUtil.textSecondary(this.darkMode))
       }
@@ -343,10 +452,17 @@ struct Index {
       .borderRadius(12)
       .backgroundColor(ThemeUtil.tagBg(this.darkMode))
 
-      Text('查看完整《隐私声明》 >')
-        .fontSize($r('app.float.caption_text'))
-        .fontColor(ThemeUtil.brandDeep(this.darkMode))
-        .onClick((): void => { this.pathStack.pushPathByName('Privacy', ''); })
+      Row({ space: 16 }) {
+        Text('查看《用户协议》 >')
+          .fontSize($r('app.float.caption_text'))
+          .fontColor(ThemeUtil.brandDeep(this.darkMode))
+          .onClick((): void => { this.pathStack.pushPathByName('Agreement', ''); })
+        Text('查看《隐私声明》 >')
+          .fontSize($r('app.float.caption_text'))
+          .fontColor(ThemeUtil.brandDeep(this.darkMode))
+          .onClick((): void => { this.pathStack.pushPathByName('Privacy', ''); })
+      }
+      .width('100%')
 
       Row({ space: 12 }) {
         Text('不同意并退出')
@@ -399,12 +515,16 @@ struct Index {
       FavoritesPage()
     } else if (name === 'Privacy') {
       PrivacyPage()
+    } else if (name === 'Agreement') {
+      UserAgreementPage()
     } else if (name === 'About') {
       AboutPage()
     } else if (name === 'Login') {
       LoginPage()
     } else if (name === 'DeleteAccount') {
       DeleteAccountPage()
+    } else if (name === 'SchoolPicker') {
+      SchoolPickerPage()
     }
   }
 
@@ -439,38 +559,62 @@ struct Index {
         }
         .width('100%')
 
+        // 学校信息：点击可进入选校页修改（未选校时提示去选择）
+        Row() {
+          Row({ space: 6 }) {
+            Text('📍')
+              .fontSize(12)
+            Text(this.schoolName || '还未选择学校')
+              .fontSize($r('app.float.caption_text'))
+              .fontColor(Color.White)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .constraintSize({ maxWidth: 170 })
+            Text(this.schoolName ? '切换 ▾' : '去选择 >')
+              .fontSize(11)
+              .fontColor('rgba(255,255,255,0.85)')
+          }
+          .backgroundColor('rgba(255,255,255,0.22)')
+          .borderRadius(14)
+          .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+          .onClick((): void => { this.goSchoolPicker(); })
+        }
+        .width('100%')
+
         Text(`${this.mealGreetings[this.currentMealIdx]}，今天想吃点啥？`)
           .fontSize($r('app.float.body_text'))
           .fontColor('rgba(255,255,255,0.92)')
           .width('100%')
 
-        Row({ space: 6 }) {
-          Text('🔍')
-            .fontSize(14)
-          TextInput({ placeholder: '搜索菜品，比如「牛肉面」' })
-            .layoutWeight(1)
-            .height(36)
-            .fontSize($r('app.float.caption_text'))
-            .fontColor('#1C3B30')
-            .placeholderColor('#8FA69B')
-            .placeholderFont({ size: $r('app.float.caption_text') })
-            .backgroundColor(Color.Transparent)
-            .padding(0)
-            .onChange((v: string): void => { this.onSearchChange(v); })
-            .onSubmit((): void => {
-              if (this.searchTimer !== -1) {
-                clearTimeout(this.searchTimer);
-                this.searchTimer = -1;
-              }
-              this.loadMenu();
-            })
+        if (this.schoolId) {
+          Row({ space: 6 }) {
+            Text('🔍')
+              .fontSize(14)
+            TextInput({ placeholder: '搜索菜品，比如「牛肉面」' })
+              .layoutWeight(1)
+              .height(36)
+              .fontSize($r('app.float.caption_text'))
+              .fontColor('#1C3B30')
+              .placeholderColor('#8FA69B')
+              .placeholderFont({ size: $r('app.float.caption_text') })
+              .backgroundColor(Color.Transparent)
+              .padding(0)
+              .onChange((v: string): void => { this.onSearchChange(v); })
+              .onSubmit((): void => {
+                if (this.searchTimer !== -1) {
+                  clearTimeout(this.searchTimer);
+                  this.searchTimer = -1;
+                }
+                this.loadMenu();
+              })
+          }
+          .width('100%')
+          .height(40)
+          .padding({ left: 12, right: 12 })
+          .backgroundColor('rgba(255,255,255,0.95)')
+          .borderRadius(20)
+          .alignItems(VerticalAlign.Center)
         }
-        .width('100%')
-        .height(40)
-        .padding({ left: 12, right: 12 })
-        .backgroundColor('rgba(255,255,255,0.95)')
-        .borderRadius(20)
-        .alignItems(VerticalAlign.Center)
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 14, bottom: 16 })
@@ -748,5 +892,10 @@ struct Index {
 
   private goProfile(): void {
     this.pathStack.pushPathByName('Profile', '');
+  }
+
+  /** 进入学校选择页（首次选校引导 / 点击主页学校名改校共用） */
+  private goSchoolPicker(): void {
+    this.pathStack.pushPathByName('SchoolPicker', '');
   }
 }
