@@ -11,6 +11,9 @@
 **/.test
 /.appanalyzer
 
+# 签名物料（私钥库 / 证书 / Profile），仅本地保留，禁止入库
+/signature/
+
 # server
 /server/node_modules
 /server/uploads
