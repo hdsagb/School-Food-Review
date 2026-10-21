@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS users (
   avatar TEXT DEFAULT '',
   username TEXT DEFAULT '',
   password_hash TEXT DEFAULT '',
-  school_id TEXT DEFAULT ''
+  school_id TEXT DEFAULT '',
+  hw_uid TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS user_favorites (
@@ -117,6 +118,14 @@ CREATE TABLE IF NOT EXISTS settings (
 // ---------- 系统设置默认值（幂等：已存在则不覆盖，管理员改过的值不受影响） ----------
 db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_review_limit', '50')").run();
 db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('monthly_review_limit', '400')").run();
+
+// ---------- 兼容旧库：华为账号登录新增 hw_uid 列 ----------
+const userColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+if (!userColumns.includes('hw_uid')) {
+  db.exec("ALTER TABLE users ADD COLUMN hw_uid TEXT DEFAULT ''");
+}
+// 华为账号标识唯一（空值不参与唯一约束）
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_hw_uid ON users(hw_uid) WHERE hw_uid <> ''");
 
 // 提交评价前按 (user_id, create_time) 统计当日/当月条数，建复合索引避免全表扫描
 db.exec(`CREATE INDEX IF NOT EXISTS idx_reviews_user_time ON reviews(user_id, create_time)`);

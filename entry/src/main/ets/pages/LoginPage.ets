@@ -1,9 +1,12 @@
 import { Api } from '../net/Api';
 import { ThemeUtil } from '../utils/ThemeUtil';
+import { authentication } from '@kit.AccountKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 
 /**
  * 登录 / 注册页
- * - 双页签切换；注册含可选昵称
+ * - 首选华为账号一键登录（不收集手机号，仅取账号唯一标识）
+ * - 也可使用自定义用户名密码登录 / 注册
  * - 成功后经 X-Auth-Token 自动换发 token，返回来源页
  */
 @Component
@@ -16,6 +19,7 @@ export struct LoginPage {
   @State nickname: string = '';
   @State error: string = '';
   @State submitting: boolean = false;
+  @State hwLogging: boolean = false;
 
   build() {
     NavDestination() {
@@ -35,6 +39,36 @@ export struct LoginPage {
         .height(48)
 
         Column({ space: 16 }) {
+          // 首选：华为账号一键登录
+          Text(this.hwLogging ? '正在验证华为账号…' : '🔐 华为账号一键登录')
+            .fontSize($r('app.float.body_text'))
+            .fontColor(Color.White)
+            .fontWeight(FontWeight.Medium)
+            .textAlign(TextAlign.Center)
+            .width('100%')
+            .height(44)
+            .borderRadius(22)
+            .opacity(this.hwLogging ? 0.6 : 1.0)
+            .linearGradient({
+              angle: 135,
+              colors: [
+                [$r('app.color.brand_gradient_start'), 0.0],
+                [$r('app.color.brand_gradient_end'), 1.0]
+              ]
+            })
+            .onClick((): void => { this.doHuaweiLogin(); })
+
+          Row() {
+            Divider().vertical(true).height(12).color(ThemeUtil.textHint(this.darkMode)).opacity(0.3)
+            Text('或使用自定义账号')
+              .fontSize($r('app.float.caption_text'))
+              .fontColor(ThemeUtil.textHint(this.darkMode))
+              .margin({ left: 8, right: 8 })
+            Divider().vertical(true).height(12).color(ThemeUtil.textHint(this.darkMode)).opacity(0.3)
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.Center)
+
           // 页签切换
           Row() {
             Text('登录')
@@ -167,6 +201,36 @@ export struct LoginPage {
     if (this.isRegister === toRegister) return;
     this.isRegister = toRegister;
     this.error = '';
+  }
+
+  /** 华为账号一键登录：客户端取 authorizationCode，服务端换取账号标识 */
+  private async doHuaweiLogin(): Promise<void> {
+    if (this.hwLogging) return;
+    this.hwLogging = true;
+    this.error = '';
+    try {
+      const provider = new authentication.HuaweiIDProvider();
+      const request = provider.createLoginWithHuaweiIDRequest();
+      const controller = new authentication.AuthenticationController(this.getUIContext().getHostContext());
+      const response = await controller.executeRequest(request) as authentication.LoginWithHuaweiIDResponse;
+      const code: string = response.data?.authorizationCode ?? '';
+      if (!code) {
+        throw new Error('未获取到华为账号授权码，请重试');
+      }
+      await Api.loginWithHuawei(code);
+      this.pathStack.pop();
+    } catch (e) {
+      // 用户主动取消授权时不打扰
+      if ((e as BusinessError).code === 1001502012) {
+        return;
+      }
+      const code = (e as BusinessError).code;
+      this.error = code === 1001502001
+        ? '请先在系统设置中登录华为账号后再试'
+        : ((e as Error).message || '华为账号登录失败，请重试');
+    } finally {
+      this.hwLogging = false;
+    }
   }
 
   private async submit(): Promise<void> {

@@ -10,6 +10,9 @@ const db = require('./db');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// 经 nginx 反向代理时信任 X-Forwarded-* 头，保证 req.protocol 与 req.ip 取到真实值
+app.set('trust proxy', true);
+
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 

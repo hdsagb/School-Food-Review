@@ -5,6 +5,8 @@ import { ThemeUtil } from '../utils/ThemeUtil';
 import { Api } from '../net/Api';
 import { AppConfig } from '../config/AppConfig';
 import { ConfigurationConstant } from '@kit.AbilityKit';
+import { authentication } from '@kit.AccountKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 
 @Component
 export struct ProfilePage {
@@ -16,6 +18,7 @@ export struct ProfilePage {
   @StorageLink('favorites') favorites: string[] = [];
   @StorageLink('isGuest') isGuest: boolean = true;
   @StorageLink('schoolName') schoolName: string = '';
+  @State loggingIn: boolean = false;
 
   async aboutToAppear(): Promise<void> {
     if (AppConfig.USE_MOCK) {
@@ -99,7 +102,8 @@ export struct ProfilePage {
             .backgroundColor(Color.Transparent)
             .padding(0)
             .onChange((v: string): void => { this.nickname = v; })
-          Text(this.isGuest ? '🌱 游客模式 · 登录后可收藏评价' : `👤 ${this.user?.username ?? ''} · 已登录`)
+          Text(this.isGuest ? '🌱 游客模式 · 登录后可收藏评价'
+            : (this.user?.authType === 'huawei' ? '🔐 华为账号 · 已登录' : `👤 ${this.user?.username ?? ''} · 已登录`))
             .fontSize($r('app.float.caption_text'))
             .fontColor(ThemeUtil.textHint(this.darkMode))
         }
@@ -120,7 +124,8 @@ export struct ProfilePage {
 
       this.MenuItem('🏫 我的学校', this.schoolName || '未选择', (): void => { this.goSchoolPicker(); })
       if (this.isGuest) {
-        this.MenuItem('🔐 登录 / 注册', '', (): void => { this.goLogin(); })
+        this.MenuItem(this.loggingIn ? '🔐 正在验证华为账号…' : '🔐 华为账号一键登录', '', (): void => { this.goHuaweiLogin(); })
+        this.MenuItem('🔐 自定义账号登录', '', (): void => { this.goLogin(); })
       } else {
         this.MenuItem('🚪 退出登录', '', (): void => { this.confirmLogout(); })
         this.MenuItem('⚠️ 注销账号', '', (): void => { this.goDeleteAccount(); })
@@ -227,6 +232,40 @@ export struct ProfilePage {
 
   private goLogin(): void {
     this.pathStack.pushPathByName('Login', '');
+  }
+
+  /** 华为账号一键登录：客户端取 authorizationCode，服务端换取账号标识并下发应用 token */
+  private async goHuaweiLogin(): Promise<void> {
+    if (this.loggingIn) return;
+    this.loggingIn = true;
+    try {
+      const provider = new authentication.HuaweiIDProvider();
+      const request = provider.createLoginWithHuaweiIDRequest();
+      const controller = new authentication.AuthenticationController(this.getUIContext().getHostContext());
+      const response = await controller.executeRequest(request) as authentication.LoginWithHuaweiIDResponse;
+      const code: string = response.data?.authorizationCode ?? '';
+      if (!code) {
+        throw new Error('未获取到华为账号授权码，请重试');
+      }
+      const user = await Api.loginWithHuawei(code);
+      this.user = user;
+      this.nickname = user.nickname;
+      this.refreshCounts();
+      this.refreshFavorites();
+      AlertDialog.show({ message: '登录成功' });
+    } catch (e) {
+      // 用户主动取消授权时不打扰
+      if ((e as BusinessError).code === 1001502012) {
+        return;
+      }
+      const code = (e as BusinessError).code;
+      const msg = code === 1001502001
+        ? '请先在系统设置中登录华为账号后再试'
+        : ((e as Error).message || '华为账号登录失败，请重试');
+      AlertDialog.show({ message: msg });
+    } finally {
+      this.loggingIn = false;
+    }
   }
 
   private goDeleteAccount(): void {

@@ -87,10 +87,10 @@ function optionalGuest(req, res, next) {
   next();
 }
 
-/** 注册用户鉴权：游客 token 仅可浏览，写操作要求已注册账号（code=2 引导登录） */
+/** 注册用户鉴权：游客 token 仅可浏览，写操作要求已登录账号（自定义账号或华为账号） */
 function registeredAuth(req, res, next) {
   guestAuth(req, res, () => {
-    if (!req.user.username) {
+    if (!req.user.username && !req.user.hw_uid) {
       res.json({ code: 2, message: '该操作需要登录后使用' });
       return;
     }

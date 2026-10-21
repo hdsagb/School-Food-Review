@@ -7,6 +7,7 @@ const db = require('../db');
 const { parseBearer, genToken, guestAuth, registeredAuth, optionalGuest, hashPassword, verifyPassword } = require('../auth');
 const { rateLimit } = require('../rateLimit');
 const { auditReview } = require('../moderation');
+const huawei = require('../huawei');
 
 const router = express.Router();
 
@@ -354,15 +355,7 @@ router.get('/user/profile', (req, res) => {
     user = { id, nickname, avatar: '' };
   }
   res.set('X-Auth-Token', user.id);
-  ok(res, {
-    id: user.id,
-    nickname: user.nickname,
-    avatar: user.avatar || '',
-    username: user.username || '',
-    schoolId: user.school_id || '',
-    schoolName: schoolNameOf(user.school_id),
-    favorites: favoritesOf(user.id, user.school_id || '')
-  });
+  ok(res, userPayload(user));
 });
 
 // GET /api/user/reviews 我的评价
@@ -417,12 +410,15 @@ router.put('/user/school', guestAuth, (req, res) => {
   ok(res, userPayload(db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id)));
 });
 
-// POST /api/user/delete { password } 注销账号（仅注册用户）
+// POST /api/user/delete { password? } 注销账号（密码账号需校验密码，华为账号凭登录态确认）
 router.post('/user/delete', registeredAuth, (req, res) => {
   const { password } = req.body || {};
-  if (!password) return fail(res, 400, '请输入登录密码以确认注销');
-  if (!verifyPassword(String(password), req.user.password_hash)) {
-    return fail(res, 403, '密码不正确');
+  // 华为账号没有本应用密码，登录态本身即身份凭证
+  if (!req.user.hw_uid) {
+    if (!password) return fail(res, 400, '请输入登录密码以确认注销');
+    if (!verifyPassword(String(password), req.user.password_hash)) {
+      return fail(res, 403, '密码不正确');
+    }
   }
 
   const uid = req.user.id;
@@ -455,6 +451,8 @@ function userPayload(user) {
     nickname: user.nickname,
     avatar: user.avatar || '',
     username: user.username || '',
+    // guest=游客，password=自定义账号，huawei=华为账号
+    authType: user.hw_uid ? 'huawei' : (user.username ? 'password' : 'guest'),
     schoolId: user.school_id || '',
     schoolName: schoolNameOf(user.school_id),
     favorites: favoritesOf(user.id, user.school_id || '')
@@ -506,5 +504,45 @@ router.post('/auth/login',
   res.set('X-Auth-Token', user.id);
   ok(res, { token: user.id, user: userPayload(user) });
 });
+
+// POST /api/auth/huawei { code } 华为账号登录
+// 客户端授权码 → 华为换 id_token → sub 作为账号标识；新用户自动建号
+router.post('/auth/huawei',
+  rateLimit({ windowMs: 15 * 60 * 1000, max: 10, scope: 'login-huawei', message: '登录过于频繁，请稍后再试' }),
+  async (req, res) => {
+    const code = String((req.body || {}).code || '').trim();
+    if (!code) {
+      return res.json({ code: 1, message: '缺少华为账号授权码，请重新登录' });
+    }
+
+    let account;
+    try {
+      account = await huawei.exchangeCode(code);
+    } catch (e) {
+      if (e.code === 'NOT_CONFIGURED') return fail(res, 503, e.message);
+      console.error('[huawei]', e.code || '', e.message, e.detail || '');
+      return fail(res, 502, e.message || '华为账号校验失败，请重试');
+    }
+
+    let user = db.prepare('SELECT * FROM users WHERE hw_uid = ?').get(account.uid);
+    if (!user) {
+      // 若当前是游客，就地升级该账号，保留已选学校与收藏
+      const token = parseBearer(req);
+      const guest = token ? db.prepare('SELECT * FROM users WHERE id = ?').get(token) : null;
+      if (guest && !guest.hw_uid && !guest.username) {
+        db.prepare('UPDATE users SET hw_uid = ? WHERE id = ?').run(account.uid, guest.id);
+        user = db.prepare('SELECT * FROM users WHERE id = ?').get(guest.id);
+      } else {
+        const id = genToken();
+        const nickname = '同学' + Math.floor(Math.random() * 1000);
+        db.prepare('INSERT INTO users (id, nickname, avatar, hw_uid) VALUES (?, ?, ?, ?)')
+          .run(id, nickname, '', account.uid);
+        user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+      }
+    }
+
+    res.set('X-Auth-Token', user.id);
+    ok(res, { token: user.id, user: userPayload(user) });
+  });
 
 module.exports = router;

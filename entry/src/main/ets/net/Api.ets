@@ -122,6 +122,14 @@ export class Api {
     return resp.user;
   }
 
+  /** 华为账号登录：客户端授权码交服务端换取账号标识（服务端不保存手机号） */
+  static async loginWithHuawei(authCode: string): Promise<User> {
+    const body: Record<string, string> = { 'code': authCode };
+    const resp = await Api.client.post<LoginResponse>('/auth/huawei', body);
+    Api.syncUserState(resp.user);
+    return resp.user;
+  }
+
   /** 退出登录：清除 token 后重新走游客引导建号 */
   static async logout(): Promise<User> {
     Api.client.setToken('');
@@ -148,7 +156,10 @@ export class Api {
 
   /** 同步用户态到 AppStorage（isGuest / localUser），供各页面响应式判断游客权限 */
   private static syncUserState(user: User): void {
-    AppStorage.setOrCreate<boolean>('isGuest', user.username === '');
+    // 兼容旧缓存：authType 缺省时按 username 推断
+    const authType: string = user.authType || (user.username ? 'password' : 'guest');
+    user.authType = authType;
+    AppStorage.setOrCreate<boolean>('isGuest', authType === 'guest');
     AppStorage.setOrCreate<string>('schoolId', user.schoolId || '');
     AppStorage.setOrCreate<string>('schoolName', user.schoolName || '');
     AppStorage.setOrCreate<Object>('localUser', user);

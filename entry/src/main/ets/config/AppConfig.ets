@@ -4,11 +4,11 @@
 export class AppConfig {
   /**
    * 后端 API 基础地址
-   * - 测试环境：阿里云轻量服务器公网 IP + 3000 端口（需在控制台防火墙放行 3000）
+   * - 生产环境：域名 + HTTPS（nginx 反向代理到本机 3000 端口）
    * - 本地联调：改用电脑局域网 IP（ipconfig 查询，如 http://192.168.1.4:3000/api）
    * - 注意：末尾必须保留 /api 路径前缀
    */
-  static readonly API_BASE_URL: string = 'http://47.117.188.9:3000/api';
+  static readonly API_BASE_URL: string = 'https://api.628101.xyz/api';
 
   /** 应用版本号（需与 AppScope/app.json5 的 versionName 保持一致） */
   static readonly APP_VERSION: string = '1.0.0';

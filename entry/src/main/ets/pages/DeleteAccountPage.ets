@@ -1,11 +1,13 @@
 /**
  * 注销账号页
  * - 明示注销后果（评价匿名化保留、账号信息删除、不可恢复）
- * - 需输入登录密码二次确认，成功后回到游客模式
+ * - 密码账号需输入登录密码二次确认；华为账号登录无密码，免密注销
+ * - 成功后回到游客模式
  */
 import { TopBar } from '../components/TopBar';
 import { ThemeUtil } from '../utils/ThemeUtil';
 import { Api } from '../net/Api';
+import { User } from '../model/User';
 
 @Component
 export struct DeleteAccountPage {
@@ -14,6 +16,15 @@ export struct DeleteAccountPage {
   @State password: string = '';
   @State error: string = '';
   @State submitting: boolean = false;
+  /** 华为账号登录（无登录密码），注销时免密 */
+  @State isHuawei: boolean = false;
+
+  aboutToAppear(): void {
+    const cached: Object | undefined = AppStorage.get<Object>('localUser');
+    if (cached) {
+      this.isHuawei = (cached as User).authType === 'huawei';
+    }
+  }
 
   build() {
     NavDestination() {
@@ -29,7 +40,7 @@ export struct DeleteAccountPage {
                 .fontWeight(FontWeight.Medium)
                 .fontColor('#E06C5A')
                 .width('100%')
-              Text('· 你的账号信息（用户名、登录凭据）将被永久删除，无法恢复')
+              Text('· 你的账号信息（昵称、华为账号绑定关系或用户名与登录凭据）将被永久删除，无法恢复')
                 .fontSize($r('app.float.body_text'))
                 .fontColor(ThemeUtil.textSecondary(this.darkMode))
                 .lineHeight(20)
@@ -51,17 +62,24 @@ export struct DeleteAccountPage {
             .borderRadius($r('app.float.corner_card'))
             .shadow({ radius: 8, color: 'rgba(28,59,48,0.05)', offsetX: 0, offsetY: 2 })
 
-            TextInput({ placeholder: '请输入登录密码以确认注销', text: this.password })
-              .width('100%')
-              .height(44)
-              .fontSize($r('app.float.body_text'))
-              .fontColor(ThemeUtil.textPrimary(this.darkMode))
-              .placeholderColor(ThemeUtil.textHint(this.darkMode))
-              .placeholderFont({ size: $r('app.float.caption_text') })
-              .backgroundColor(ThemeUtil.cardBg(this.darkMode))
-              .borderRadius(12)
-              .type(InputType.Password)
-              .onChange((v: string): void => { this.password = v; })
+            if (!this.isHuawei) {
+              TextInput({ placeholder: '请输入登录密码以确认注销', text: this.password })
+                .width('100%')
+                .height(44)
+                .fontSize($r('app.float.body_text'))
+                .fontColor(ThemeUtil.textPrimary(this.darkMode))
+                .placeholderColor(ThemeUtil.textHint(this.darkMode))
+                .placeholderFont({ size: $r('app.float.caption_text') })
+                .backgroundColor(ThemeUtil.cardBg(this.darkMode))
+                .borderRadius(12)
+                .type(InputType.Password)
+                .onChange((v: string): void => { this.password = v; })
+            } else {
+              Text('当前为华为账号登录，注销无需输入密码')
+                .fontSize($r('app.float.caption_text'))
+                .fontColor(ThemeUtil.textHint(this.darkMode))
+                .width('100%')
+            }
 
             if (this.error) {
               Text(this.error)
@@ -106,14 +124,14 @@ export struct DeleteAccountPage {
 
   private async submit(): Promise<void> {
     if (this.submitting) return;
-    if (!this.password) {
+    if (!this.isHuawei && !this.password) {
       this.error = '请输入登录密码';
       return;
     }
     this.submitting = true;
     this.error = '';
     try {
-      await Api.deleteAccount(this.password);
+      await Api.deleteAccount(this.isHuawei ? '' : this.password);
       this.pathStack.pop();
     } catch (e) {
       this.error = (e as Error).message || '注销失败，请重试';

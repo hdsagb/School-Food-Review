@@ -1,5 +1,6 @@
 /**
- * 用户数据模型（游客 / 注册用户共用，username 为空即游客）
+ * 用户数据模型（游客 / 注册用户共用）
+ * authType：guest=游客，password=自定义账号，huawei=华为账号
  */
 export class User {
   id: string;
@@ -9,6 +10,7 @@ export class User {
   username: string;
   schoolId: string;
   schoolName: string;
+  authType: string;
 
   constructor(
     id: string = '',
@@ -17,7 +19,8 @@ export class User {
     favorites: string[] = [],
     username: string = '',
     schoolId: string = '',
-    schoolName: string = ''
+    schoolName: string = '',
+    authType: string = 'guest'
   ) {
     this.id = id;
     this.nickname = nickname;
@@ -26,5 +29,6 @@ export class User {
     this.username = username;
     this.schoolId = schoolId;
     this.schoolName = schoolName;
+    this.authType = authType;
   }
 }
